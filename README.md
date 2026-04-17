@@ -1,12 +1,12 @@
 # Anomaly Detection API — Autoencoder + FastAPI + Docker
 
-Detección de anomalías en series temporales multivariadas (sensores de motores NASA Turbofan CMAPSS) usando un autoencoder entrenado con datos nominales, expuesto como API REST y con demo interactiva en Streamlit.
+Anomaly detection on multivariate time series (NASA Turbofan CMAPSS engine sensors) using an autoencoder trained on nominal data, served as a REST API with an interactive Streamlit demo.
 
-## Motivación
+## Motivation
 
-Este proyecto es el "pivote de ingeniería" del portafolio: combina deep learning aplicado con las habilidades que las empresas esperan de un MLE junior (APIs, contenedores, demos reproducibles).
+This is the "engineering pivot" of the portfolio: it combines applied deep learning with the skills companies expect from an ML Engineer (APIs, containers, reproducible demos).
 
-La idea: un autoencoder aprende a reconstruir series normales. Cuando recibe una serie anómala, la reconstrucción falla y el error de reconstrucción sube → se marca como anomalía.
+The idea: an autoencoder learns to reconstruct normal sequences. When given an anomalous sequence, reconstruction fails and reconstruction error rises → flagged as an anomaly.
 
 ## Stack
 
@@ -14,39 +14,39 @@ La idea: un autoencoder aprende a reconstruir series normales. Cuando recibe una
 - PyTorch 2.x
 - FastAPI + Uvicorn + Pydantic
 - Docker + docker-compose
-- Streamlit (demo frontend)
+- Streamlit (frontend demo)
 - Dataset: [NASA Turbofan CMAPSS](https://www.kaggle.com/datasets/behrad3d/nasa-cmaps)
 
-## Estructura
+## Structure
 
 ```
 03-anomaly-detection-api/
 ├── README.md
 ├── requirements.txt
-├── Dockerfile             # (pendiente)
+├── Dockerfile             # (pending)
 ├── src/
-│   ├── autoencoder.py     # Modelo autoencoder LSTM / 1D-CNN
-│   ├── data.py            # Carga y preprocesamiento del dataset
+│   ├── autoencoder.py     # LSTM / 1D-CNN autoencoder model
+│   ├── data.py            # Dataset loading and preprocessing
 │   ├── train.py           # Training loop
-│   ├── api.py             # FastAPI: endpoint /predict
-│   └── app_streamlit.py   # Demo interactiva
+│   ├── api.py             # FastAPI: /predict endpoint
+│   └── app_streamlit.py   # Interactive demo
 └── notebooks/
 ```
 
 ## Roadmap
 
-- [ ] Descargar y preprocesar dataset CMAPSS.
-- [ ] Implementar autoencoder y entrenar con series "sanas".
-- [ ] Definir umbral de anomalía (percentil 99 del error en validación).
-- [ ] Endpoint FastAPI `/predict` que recibe una serie y devuelve `{is_anomaly, score}`.
-- [ ] Demo Streamlit para subir CSV y visualizar resultados.
+- [ ] Download and preprocess CMAPSS dataset.
+- [ ] Implement autoencoder and train on "healthy" sequences.
+- [ ] Define anomaly threshold (99th percentile of validation error).
+- [ ] FastAPI `/predict` endpoint accepting a series and returning `{is_anomaly, score}`.
+- [ ] Streamlit demo to upload a CSV and visualize results.
 - [ ] Dockerfile + docker-compose.
-- [ ] README final con métricas (precision/recall/ROC-AUC) y screenshot de la demo.
+- [ ] Final README with metrics (precision / recall / ROC-AUC) and demo screenshot.
 
-## Cómo correrlo (cuando esté listo)
+## How to run (when ready)
 
 ```bash
 docker-compose up --build
-# API en http://localhost:8000/docs
-# Demo en http://localhost:8501
+# API at http://localhost:8000/docs
+# Demo at http://localhost:8501
 ```
