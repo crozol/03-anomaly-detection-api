@@ -1,11 +1,11 @@
-torch>=2.2
-numpy>=1.26
-pandas>=2.2
-fastapi>=0.110
-uvicorn[standard]>=0.29
-pydantic>=2.6
-streamlit>=1.33
-matplotlib>=3.8
+torch>=2.5,<2.7
+numpy>=1.26,<3.0
+pandas>=2.2,<3.0
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.29,<1.0
+pydantic>=2.6,<3.0
+streamlit>=1.33,<2.0
+matplotlib>=3.8,<4.0
 python-multipart>=0.0.9
 
 # dev / test

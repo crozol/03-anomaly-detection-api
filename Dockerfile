@@ -24,10 +24,13 @@ RUN apt-get update \
 WORKDIR /opt/build
 
 COPY requirements.txt ./
+# Two-step install: pull the CPU-only torch wheel from PyTorch's index first
+# (saves ~1.5 GB of CUDA dependencies), then resolve the rest of the stack
+# from PyPI against the upper bounds declared in requirements.txt.
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --upgrade pip \
- && /opt/venv/bin/pip install --extra-index-url https://download.pytorch.org/whl/cpu \
-        torch==2.2.* \
+ && /opt/venv/bin/pip install --index-url https://download.pytorch.org/whl/cpu \
+        "torch>=2.5,<2.7" \
  && /opt/venv/bin/pip install -r requirements.txt
 
 
