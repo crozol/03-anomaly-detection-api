@@ -1,5 +1,8 @@
 # Anomaly Detection API · Autoencoder + FastAPI + Docker
 
+[![Live demo on Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Live%20demo-Hugging%20Face%20Space-FFD21E?style=flat-square)](https://huggingface.co/spaces/crozol/cmapss-anomaly-detector)
+[![Portfolio page](https://img.shields.io/badge/Portfolio-page-7C3AED?style=flat-square)](https://crozol.github.io/projects/03-anomaly-detection-api.html)
+
 A reconstruction-based anomaly detector for multivariate sensor streams.
 An LSTM autoencoder is trained on healthy sliding windows of the NASA
 CMAPSS turbofan dataset; at inference time the reconstruction error
@@ -7,6 +10,11 @@ becomes the anomaly score, calibrated against a held-out healthy
 validation set, and any window whose error exceeds the threshold is
 flagged. The trained model is wrapped in a typed FastAPI service, an
 interactive Streamlit demo, and a two-service Docker stack.
+
+The Streamlit demo is also deployed as a public Hugging Face Space —
+[try it in the browser](https://huggingface.co/spaces/crozol/cmapss-anomaly-detector)
+without cloning the repository. The deployment configuration of that
+Space lives in a separate location (see *Live demo deployment* below).
 
 The document walks through the construction in the order one would
 actually perform it: dataset, model, calibration, and the deployment
@@ -486,6 +494,24 @@ docker compose up --build
 # API at  http://localhost:8000/docs
 # demo at http://localhost:8501
 ```
+
+### 8.4 · Public Hugging Face Space
+
+The Streamlit demo is also deployed as a public, free-to-use
+[Hugging Face Space](https://huggingface.co/spaces/crozol/cmapss-anomaly-detector).
+Anyone with a browser can score a built-in CMAPSS engine or upload their
+own CSV without cloning the repository. The Space ships only the
+Streamlit demo (the FastAPI service and Docker stack remain in this
+repository); the trained checkpoint and the threshold report travel
+with it. First load takes 20–40 s while the Space cold-starts;
+subsequent interactions are instant.
+
+The Space is provisioned from a sibling directory in the portfolio
+working tree (`spaces-cmapss-anomaly/`) which mirrors the minimal
+runtime needed: `app.py`, `requirements.txt`, the model checkpoint, the
+eval report, the FD001 raw split, and a thin copy of `src/` (autoencoder,
+data loader, checkpoint I/O). Pushing that directory to a Hugging Face
+`spaces` Git remote rebuilds the Space.
 
 ## 9 · Reproducing the experiment
 
