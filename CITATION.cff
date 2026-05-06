@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Anomaly Detection API: Autoencoder + FastAPI + Docker"
+abstract: "End-to-end anomaly detection pipeline for multivariate sensor data. An LSTM autoencoder is trained on healthy sliding windows of the NASA CMAPSS turbofan dataset; reconstruction error becomes the anomaly score, calibrated against a held-out healthy validation set. The trained model is wrapped in a typed FastAPI service and an interactive Streamlit demo, both packaged in a multi-stage Docker stack and deployed as a public Hugging Face Space."
+authors:
+  - given-names: "Camilo Andrés"
+    family-names: "Rozo Lozano"
+    affiliation: "Universidad Nacional de Colombia"
+    email: rozol.ca555@gmail.com
+repository-code: "https://github.com/crozol/03-anomaly-detection-api"
+license: MIT
+version: "1.0.0"
+date-released: 2026-05-05
+keywords:
+  - anomaly detection
+  - LSTM autoencoder
+  - predictive maintenance
+  - NASA CMAPSS
+  - FastAPI
+  - Docker
