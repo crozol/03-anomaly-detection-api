@@ -5,6 +5,8 @@
 [![Portfolio page](https://img.shields.io/badge/Portfolio-page-7C3AED?style=flat-square)](https://crozol.github.io/projects/03-anomaly-detection-api.html)
 [![Live demo on Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Live%20demo-Hugging%20Face%20Space-FFD21E?style=flat-square)](https://huggingface.co/spaces/crozol/cmapss-anomaly-detector)
 
+**TL;DR** — Reconstruction-based anomaly detection on the NASA CMAPSS FD001 turbofan dataset. An LSTM autoencoder is trained on healthy sliding windows; the decision threshold is fixed as the 99th-percentile of the validation reconstruction error (operator-tuneable false-positive budget). On the held-out test split: **ROC-AUC = 0.969 · PR-AUC = 0.882 · F1 = 0.738** (recall **0.937** at precision **0.608**). Wrapped in a typed FastAPI service, a Streamlit demo, and a two-service multi-stage Docker stack. Stack: PyTorch · FastAPI · Streamlit · Docker.
+
 A reconstruction-based anomaly detector for multivariate sensor streams.
 An LSTM autoencoder is trained on healthy sliding windows of the NASA
 CMAPSS turbofan dataset; at inference time the reconstruction error
