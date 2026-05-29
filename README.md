@@ -138,7 +138,7 @@ multiple run-to-failure simulations of a fleet of jet engines under
 different operating conditions and fault modes. The sub-dataset
 **FD001** (single condition, single fault mode) is used here. Each row
 of `train_FD001.txt` is one operational cycle of one engine and carries
-24 numbers — 1 unit id, 1 cycle, 3 operating settings and 21 sensors —
+26 numbers — 1 unit id, 1 cycle, 3 operating settings and 21 sensors —
 plus an implicit RUL: the cycles remaining until the unit fails.
 
 Seven of the 21 sensors are constant or near-constant in FD001 and are
