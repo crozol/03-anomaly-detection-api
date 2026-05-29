@@ -249,6 +249,20 @@ or `q99.9`; lowering the quantile trades recall for precision, raising
 it does the opposite. The full ROC sweep below shows where the q99
 operating point sits.
 
+**What the threshold means physically.** Because the autoencoder only ever
+sees nominal operation, it learns the manifold of healthy sensor dynamics; the
+reconstruction error measures how far a 30-cycle window has drifted off it.
+Early in an engine's life the high-pressure compressor operates close to spec
+and the sensor signature reconstructs cleanly; as the HPC degrades, efficiency
+and flow shift, the sensor pattern moves away from anything seen in training,
+and the error climbs. The threshold `τ` is therefore not an arbitrary cut — it
+marks where a window's deviation from nominal exceeds what healthy
+thermodynamic noise can explain (the 1 % tail of the healthy distribution).
+Crossing `τ` is the model reporting that the engine's measured behaviour is no
+longer consistent with a healthy unit. This is also why the false alarms in
+section 6.3 cluster at `RUL` 30–60: they are genuine early degradation that the
+binary `RUL ≤ 30` label has not yet called anomalous.
+
 ## 6 · Results · binary anomaly detection
 
 The figures here come from `python main.py` and are written to
