@@ -5,7 +5,7 @@
 [![Portfolio page](https://img.shields.io/badge/Portfolio-page-7C3AED?style=flat-square)](https://crozol.github.io/projects/03-anomaly-detection-api.html)
 [![Live demo on Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Live%20demo-Hugging%20Face%20Space-FFD21E?style=flat-square)](https://huggingface.co/spaces/crozol/cmapss-anomaly-detector)
 
-**TL;DR** — Reconstruction-based anomaly detection on the NASA CMAPSS FD001 turbofan dataset. An LSTM autoencoder is trained on healthy sliding windows; the decision threshold is fixed as the 99th-percentile of the validation reconstruction error (operator-tuneable false-positive budget). On the held-out test split: **ROC-AUC = 0.969 · PR-AUC = 0.882 · F1 = 0.738** (recall **0.937** at precision **0.608**). Wrapped in a typed FastAPI service, a Streamlit demo, and a two-service multi-stage Docker stack. Stack: PyTorch · FastAPI · Streamlit · Docker.
+**TL;DR** — Reconstruction-based anomaly detection on the NASA CMAPSS FD001 turbofan dataset. An LSTM autoencoder is trained on healthy sliding windows; the decision threshold is fixed as the 99th-percentile of the validation reconstruction error (operator-tuneable false-positive budget). On 20 held-out engines: **ROC-AUC = 0.969 [0.954, 0.985]** (95 % CI, bootstrap over engines) · **AP = 0.882** · recall **0.937** at precision **0.608**. It clearly beats a trivial cycle-count score (0.839) and a linear PCA reconstruction (0.895); an Isolation Forest on the same windows matches it (0.970). At the q99 threshold every test engine is flagged before failure, with a median of **46 cycles** of warning. Wrapped in a typed FastAPI service, a Streamlit demo, and a two-service multi-stage Docker stack. Stack: PyTorch · FastAPI · Streamlit · Docker.
 
 A reconstruction-based anomaly detector for multivariate sensor streams.
 An LSTM autoencoder is trained on healthy sliding windows of the NASA
@@ -78,9 +78,16 @@ Concretely:
 3. evaluate on a held-out set of test engines, where each window is
    labelled `anomaly = (RUL ≤ 30)` from the run-to-failure ground
    truth;
-4. report precision, recall, F1, ROC-AUC and PR-AUC against that label;
+4. report precision, recall, F1, ROC-AUC and average precision (AP)
+   against that label, with engine-level uncertainty and against
+   baselines computed on the same split;
 5. wrap the trained model in a FastAPI service, a Streamlit demo, and a
    reproducible Docker stack.
+
+In practice the label makes this a near-failure detection task: flag
+windows from engines that are within 30 cycles of failure, using a model
+that never saw a window closer than 100 cycles to failure during
+training.
 
 ## 2 · Equipment (software stack)
 
@@ -90,6 +97,7 @@ Concretely:
 | PyTorch 2.5+ (CPU wheel) | LSTM autoencoder (encoder/decoder + linear bottleneck), Adam, cosine LR |
 | FastAPI + Uvicorn + Pydantic | Typed `/predict` and `/info` endpoints; auto-generated OpenAPI |
 | Streamlit | Interactive demo with CSV upload and built-in engine selection |
+| scikit-learn | Baselines (PCA, Isolation Forest) and a cross-check of the hand-written metrics in the tests |
 | Matplotlib | Static figures for the README (dark portfolio theme) |
 | Docker + docker compose | Multi-stage image, healthcheck, two-service orchestration |
 | pytest + httpx (TestClient) | API contract tests |
@@ -281,9 +289,15 @@ The figures here come from `python main.py` and are written to
 | **Precision** (flagged windows that are truly anomalous) | **0.608** |
 | **F1**               | **0.738** |
 | Accuracy             | **0.894** |
-| **ROC-AUC**          | **0.969** |
-| **PR-AUC**           | **0.882** |
+| **ROC-AUC**          | **0.969** [0.954, 0.985] |
+| **Average precision (AP)** | **0.882** [0.840, 0.934] |
 | Confusion (TN · FP · FN · TP) | 2 919 · 374 · 39 · 581 |
+
+Brackets are 95 % intervals from a bootstrap over the 20 test engines
+(section 6.6). AP is the step-wise area under the PR curve
+(`Σ (Rₙ − Rₙ₋₁) Pₙ`, as in scikit-learn's `average_precision_score`);
+trapezoidal integration is optimistic in PR space (Davis & Goadrich,
+2006). Here the two agree to the third decimal.
 
 ### 6.1 · Reconstruction error · healthy vs anomalous
 
@@ -318,8 +332,12 @@ Row-normalised confusion matrix on the 3 913 test windows. The diagonal
 sits at 88.6 % and 93.7 %; the off-diagonal of interest is the
 **6.3 % miss rate** on truly anomalous windows — 39 windows out of 620
 fall under the threshold. The 11.4 % false-alarm rate (374 healthy
-windows above threshold) is concentrated on engines whose RUL is in the
-30-60 range, i.e. just outside the anomaly cut-off — early degradation
+windows above threshold) is far from the 1 % that "q99" might suggest,
+because the test negatives are not the same population as the
+calibration set: validation holds only RUL > 100 windows, while test
+negatives include the 30 < RUL ≤ 100 grey zone. On test windows with
+RUL > 100 the false-alarm rate is **0 %**; 297 of the 374 false alarms
+(79 %) sit at RUL 30–60, just outside the anomaly cut-off — early degradation
 that the model legitimately picks up but that the binary RUL ≤ 30 label
 considers "healthy". The full per-engine view in section 6.4 makes that
 explicit.
@@ -357,6 +375,50 @@ Three sensor traces on top, the reconstruction score on bottom with the
 threshold and the flagged region shaded. `scripts/demo_preview.py`
 regenerates this figure deterministically.
 
+### 6.6 · Baselines, uncertainty and lead time
+
+`python -m scripts.baselines` scores the same test windows with three
+alternatives, all fitted on the same healthy training windows and
+thresholded at the q99 of their own validation scores:
+
+- **Cycle index** — the score is simply how many cycles the engine has
+  run. The label (RUL ≤ 30) is monotone in time within each engine, so
+  this trivial score is the first thing the autoencoder has to beat.
+- **PCA reconstruction** — a linear autoencoder with as many components
+  as the LSTM latent (16), on the flattened 30 × 14 windows.
+- **Isolation Forest** — 300 trees on the same flattened windows.
+
+**Uncertainty.** Windows overlap 29/30 and the 3 913 test windows come
+from only 20 engines, so the effective sample size is of order 20, not
+3 913. The intervals below come from resampling the 20 test *engines*
+with replacement (1 000 replicates) and recomputing each metric.
+
+**Lead time.** For each test engine, the alarm is the first window after
+which the score stays above threshold until the end of the record; the
+lead time is the RUL at that window. Twenty numbers, one per engine.
+
+| Score | ROC-AUC [95 % CI] | AP [95 % CI] | False alarms, RUL > 100 | Lead time, median [IQR] | Engines missed |
+|---|---|---|---|---|---|
+| Cycle index | 0.839 [0.803, 0.897] | 0.484 [0.459, 0.625] | 25.8 % | 88 [57, 144] | 0 / 20 |
+| PCA (16 comp.) | 0.895 [0.841, 0.944] | 0.743 [0.665, 0.817] | 0 % | 16 [4, 24] | 4 / 20 |
+| Isolation Forest | **0.970** [0.955, 0.985] | **0.885** [0.849, 0.931] | 0 % | 34 [24, 54] | 0 / 20 |
+| **LSTM autoencoder** | **0.969** [0.954, 0.985] | **0.882** [0.840, 0.934] | 0 % | 46 [28, 67] | 0 / 20 |
+
+What this shows:
+
+- The autoencoder has learned degradation, not elapsed time: its interval
+  does not overlap the cycle-index one. The cycle count's long lead time
+  is not a feature — it buys it with false alarms on a quarter of the
+  healthy windows.
+- The non-linear model matters: a linear reconstruction with the same
+  latent size ranks worse and misses 4 of the 20 engines entirely.
+- **An Isolation Forest on the same windows is statistically
+  indistinguishable from the autoencoder** in ranking quality. The
+  autoencoder raises its persistent alarm somewhat earlier (median 46 vs
+  34 cycles), but the spread across engines is wide enough that this
+  difference is not established either. The reason to keep the
+  autoencoder is not a better score (section 7.1).
+
 ## 7 · Design choices and alternatives
 
 For every consequential building block — modelling, serving, packaging
@@ -371,8 +433,8 @@ unlabelled-failure stream":
 
 | Family | Strength | Why not here |
 |---|---|---|
-| Isolation Forest / One-Class SVM | Fast, no hyperparameter tuning, works on tabular features | Treat each window as a flat vector — destroys the temporal correlation that a turbofan trajectory carries. Reported ROC-AUC on CMAPSS sits around 0.85, vs the **0.969** reached here. |
-| Variational autoencoder (VAE) | Probabilistic reconstruction error → calibrated likelihood | The KL term distorts the loss landscape on small datasets (5 032 training windows) and the gain over a deterministic AE on this task is ≤ 0.01 AUC in published ablations. The ELBO interpretation is not used downstream — only the per-window score. |
+| Isolation Forest / One-Class SVM | Fast, no hyperparameter tuning, works on tabular features | Measured here (section 6.6): an Isolation Forest reaches ROC-AUC 0.970, statistically indistinguishable from the LSTM autoencoder (0.969). The autoencoder is kept because it reconstructs each sensor, so an alarm can be traced to the sensors that drift — not because it ranks better. |
+| Variational autoencoder (VAE) | Probabilistic reconstruction error → calibrated likelihood | Not measured in this project. The KL term adds a second objective on a small dataset (5 032 training windows), and the ELBO interpretation is not used downstream — only the per-window score. |
 | **Deterministic reconstruction autoencoder** *(chosen)* | Single objective, single output, score-and-threshold pipeline | Matches the operational requirement exactly: one number per window, calibrated against held-out healthy data. |
 
 A supervised classifier is *not* an alternative on this regime —
@@ -383,8 +445,8 @@ not balanced enough to train against.
 
 | Choice | Cost | Result on this dataset |
 |---|---|---|
-| MLP on flattened window | Smallest, fastest | Discards temporal order — the same window scrambled in time scores identically. ROC-AUC drops to ≈ 0.91 in spot checks. |
-| 1D-CNN (causal convolutions) | One third of the parameters, ~5× faster training | Reaches comparable AUC. Listed as the next ablation in section 11. The reason it is not the default is mostly inertia: the LSTM is the published baseline (Malhotra et al., 2016) and the cost of using it is already negligible — 46 s on CPU. |
+| MLP on flattened window | Smallest, fastest | Discards temporal order — the same window scrambled in time scores identically. Not measured; the closest measured analogue, a linear PCA reconstruction, reaches 0.895 (section 6.6). |
+| 1D-CNN (causal convolutions) | One third of the parameters, ~5× faster training | Not measured; listed as the next ablation in section 11. The reason it is not the default is mostly inertia: the LSTM is the published baseline (Malhotra et al., 2016) and the cost of using it is already negligible — 46 s on CPU. |
 | Transformer encoder | Quadratic attention; 5–10× more parameters at the same hidden size | Window length is 30. Self-attention has nothing to discover that a 64-unit LSTM cannot already represent — over-parametrisation is more likely than gain. |
 | **LSTM autoencoder** *(chosen)* | 44 510 parameters, < 1 min on CPU | Captures the temporal contour while staying small. The encoder collapses the window into a hidden state; the decoder rolls it back from a replicated latent vector. |
 
@@ -542,13 +604,16 @@ python main.py
 # skip training and reuse the checkpoint (≈ 3 s)
 python main.py --no-train
 
+# baselines, engine-bootstrap intervals and lead times (section 6.6, ≈ 1 min)
+python -m scripts.baselines
+
 # regenerate the JSON bundle the portfolio chart consumes
 python -m scripts.export_json
 
 # regenerate the demo preview figure
 python -m scripts.demo_preview --unit 95
 
-# run the API contract tests
+# run the tests (API contract + metrics vs scikit-learn)
 python -m pytest tests/
 
 # launch services locally without Docker
@@ -580,7 +645,8 @@ data/
   ├── metrics.json           # full numeric summary
   ├── eval_report.json       # threshold + binary metrics
   ├── eval_arrays.npz        # per-window errors + ROC sweep
-  └── train_metrics.json     # per-epoch loss curve
+  ├── train_metrics.json     # per-epoch loss curve
+  └── baselines.json         # section 6.6 (from scripts.baselines)
 checkpoints/
   └── autoencoder.pt         # weights + normalisation stats
 ```
@@ -597,7 +663,7 @@ run. Selected fields:
 | `dataset.anomaly_fraction` | Test prevalence of the anomaly label |
 | `training.final_train_loss`/`final_val_loss` | MSE at the last epoch (healthy windows) |
 | `evaluation.threshold` | Calibrated decision threshold |
-| `evaluation.roc_auc` / `pr_auc` | Score-only ranking quality |
+| `evaluation.roc_auc` / `average_precision` | Score-only ranking quality |
 | `evaluation.precision`/`recall`/`f1`/`accuracy` | Binary metrics at the calibrated threshold |
 | `evaluation.confusion` | Raw counts (`tn`, `fp`, `fn`, `tp`) |
 | `evaluation.err_test_anomalous_mean` / `err_test_healthy_mean` | Mean reconstruction error per ground-truth class |
@@ -615,8 +681,8 @@ weight decay are deliberately tuned to make that rare.
 ## 11 · Optional follow-ups
 
 **Ablation: 1D-CNN encoder.** A small temporal-convolutional encoder
-typically reaches comparable AUC with one third of the parameters and
-one fifth of the training time. The `src.autoencoder` interface only
+with one third of the parameters and a fraction of the training time
+(not measured here). The `src.autoencoder` interface only
 needs a different `encoder` module with the same `(B, T, C) → (B, H)`
 contract.
 
@@ -657,11 +723,13 @@ section 6.4 without changing the autoencoder.
 │   └── app_streamlit.py             # interactive demo
 ├── scripts/
 │   ├── __init__.py
+│   ├── baselines.py                 # baselines, engine bootstrap, lead time
 │   ├── export_json.py               # arrays → JSON for the portfolio chart
 │   └── demo_preview.py              # static replica of the demo (figures/demo.png)
 ├── tests/
 │   ├── __init__.py
-│   └── test_api.py                  # /health · /info · /predict (5 cases)
+│   ├── test_api.py                  # /health · /info · /predict (5 cases)
+│   └── test_metrics.py              # ROC-AUC and AP agree with scikit-learn
 ├── figures/                         # tracked PNGs embedded in this README
 │   ├── sensors.png
 │   ├── training_loss.png
@@ -676,7 +744,8 @@ section 6.4 without changing the autoencoder.
     ├── metrics.json
     ├── eval_report.json
     ├── eval_arrays.npz
-    └── train_metrics.json
+    ├── train_metrics.json
+    └── baselines.json
 ```
 
 ## 13 · References
@@ -696,5 +765,11 @@ section 6.4 without changing the autoencoder.
   Anomaly Detection.* ICML Anomaly Detection Workshop. (LSTM
   autoencoder applied to multivariate time series; closest precedent
   for the architecture used here.)
+- Liu, F. T., Ting, K. M. & Zhou, Z.-H. (2008). *Isolation Forest.*
+  Proceedings of the 8th IEEE International Conference on Data Mining
+  (ICDM), 413–422. (Baseline in section 6.6.)
+- Davis, J. & Goadrich, M. (2006). *The Relationship Between
+  Precision-Recall and ROC Curves.* Proceedings of the 23rd ICML,
+  233–240. (Why AP rather than trapezoidal PR-AUC.)
 - Ramachandran, P. et al. (2020). *FastAPI for Python production
   services.* Documentation, https://fastapi.tiangolo.com .

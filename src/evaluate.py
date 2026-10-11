@@ -46,7 +46,7 @@ class EvalReport:
     f1: float
     accuracy: float
     roc_auc: float
-    pr_auc: float
+    average_precision: float
     confusion: dict[str, int]      # tn, fp, fn, tp
     err_healthy_train_mean: float
     err_healthy_val_mean: float
@@ -136,6 +136,18 @@ def pr_curve(score: np.ndarray, y_true: np.ndarray) -> tuple[np.ndarray, np.ndar
     return precision, recall, thr
 
 
+def average_precision(score: np.ndarray, y_true: np.ndarray) -> float:
+    """Area under the PR curve as a step function, AP = Σ (R_n − R_{n−1}) P_n.
+
+    Trapezoidal integration of the PR curve interpolates linearly between
+    operating points, which is optimistic in PR space (Davis & Goadrich,
+    2006). The step-wise sum is the standard estimator and matches
+    ``sklearn.metrics.average_precision_score``.
+    """
+    precision, recall, _ = pr_curve(score, y_true)
+    return float(np.sum(np.diff(recall) * precision[1:]))
+
+
 # --------------------------------------------------------------------------- #
 #  high-level evaluation
 # --------------------------------------------------------------------------- #
@@ -163,7 +175,7 @@ def evaluate_model(
     fpr, tpr, roc_thr = roc_curve(err_test, ds.test_label)
     roc_auc = auc(fpr, tpr)
     prec_curve, rec_curve, pr_thr = pr_curve(err_test, ds.test_label)
-    pr_auc = float(np.trapezoid(prec_curve, rec_curve))
+    ap = average_precision(err_test, ds.test_label)
 
     healthy_test = err_test[ds.test_label == 0]
     anomalous_test = err_test[ds.test_label == 1]
@@ -178,7 +190,7 @@ def evaluate_model(
         f1=metrics["f1"],
         accuracy=metrics["accuracy"],
         roc_auc=roc_auc,
-        pr_auc=pr_auc,
+        average_precision=ap,
         confusion={
             "tn": metrics["tn"], "fp": metrics["fp"],
             "fn": metrics["fn"], "tp": metrics["tp"],
@@ -195,6 +207,8 @@ def evaluate_model(
         "err_test": err_test,
         "y_test": ds.test_label.astype(np.int32),
         "rul_test": ds.test.rul.astype(np.float32),
+        "unit_test": ds.test.unit.astype(np.int32),
+        "cycle_test": ds.test.cycle_end.astype(np.int32),
         "fpr": fpr, "tpr": tpr, "roc_thresholds": roc_thr,
         "precision_curve": prec_curve, "recall_curve": rec_curve, "pr_thresholds": pr_thr,
     }
@@ -213,6 +227,7 @@ def save_report(path: str | Path, report: EvalReport, extra: dict | None = None)
 __all__ = [
     "EvalReport",
     "auc",
+    "average_precision",
     "binary_metrics",
     "calibrate_threshold",
     "confusion_counts",

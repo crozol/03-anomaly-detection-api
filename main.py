@@ -93,7 +93,7 @@ def main() -> None:
     print(f"  threshold (q={args.quantile}) = {report.threshold:.4f}")
     print(f"  precision = {report.precision:.3f}  recall = {report.recall:.3f}  "
           f"F1 = {report.f1:.3f}")
-    print(f"  ROC-AUC   = {report.roc_auc:.3f}    PR-AUC = {report.pr_auc:.3f}")
+    print(f"  ROC-AUC   = {report.roc_auc:.3f}    AP = {report.average_precision:.3f}")
     print(f"  confusion = {report.confusion}")
 
     np.savez_compressed(data_dir / "eval_arrays.npz", **arrays)
@@ -152,7 +152,7 @@ def main() -> None:
             "f1": report.f1,
             "accuracy": report.accuracy,
             "roc_auc": report.roc_auc,
-            "pr_auc": report.pr_auc,
+            "average_precision": report.average_precision,
             "confusion": report.confusion,
             "err_healthy_train_mean": report.err_healthy_train_mean,
             "err_healthy_val_mean": report.err_healthy_val_mean,

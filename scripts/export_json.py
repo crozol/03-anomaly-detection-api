@@ -98,7 +98,7 @@ def main(out_path: str = "../website/assets/data/03-anomaly.json",
         "pr": {
             "recall": [round(float(x), 5) for x in _thin(arrays["recall_curve"], 200)],
             "precision": [round(float(x), 5) for x in _thin(arrays["precision_curve"], 200)],
-            "auc": metrics["evaluation"]["pr_auc"],
+            "auc": metrics["evaluation"]["average_precision"],
         },
         "engines": [_engine_trace(err_test, rul_test, units, u) for u in engine_units],
         "anomaly_cutoff": metrics["dataset"]["anomaly_cutoff"],
