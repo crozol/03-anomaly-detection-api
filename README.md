@@ -132,10 +132,11 @@ Two engineering details turn this into a usable detector:
 - **Choosing τ.** The threshold must come from data the model never saw
   but still labelled *healthy*; the convention used here is the
   99th-percentile of the validation reconstruction error.
-- **Sequence-aware autoencoders.** For multivariate time series an MLP
-  bottleneck would lose the temporal structure of a window. An LSTM
-  encoder collapses a window into a single hidden state; the decoder
-  rolls it back out as a sequence.
+- **Sequence-aware autoencoders.** An MLP on the flattened window has
+  no built-in notion of time order — each cycle-sensor pair is an
+  unrelated input — and measured here it ranks windows worse (0.916 vs
+  0.968, section 7.2). An LSTM encoder collapses a window into a single
+  hidden state; the decoder rolls it back out as a sequence.
 
 ## 4 · The dataset · CMAPSS FD001
 
@@ -387,6 +388,8 @@ thresholded at the q99 of their own validation scores:
 - **PCA reconstruction** — a linear autoencoder with as many components
   as the LSTM latent (16), on the flattened 30 × 14 windows.
 - **Isolation Forest** — 300 trees on the same flattened windows.
+- **One-Class SVM** — RBF kernel (`gamma="scale"`, `nu=0.05`) on the
+  same flattened windows.
 
 **Uncertainty.** Windows overlap 29/30 and the 3 913 test windows come
 from only 20 engines, so the effective sample size is of order 20, not
@@ -402,6 +405,7 @@ lead time is the RUL at that window. Twenty numbers, one per engine.
 | Cycle index | 0.839 [0.803, 0.897] | 0.484 [0.459, 0.625] | 25.8 % | 88 [57, 144] | 0 / 20 |
 | PCA (16 comp.) | 0.895 [0.841, 0.944] | 0.743 [0.665, 0.817] | 0 % | 16 [4, 24] | 4 / 20 |
 | Isolation Forest | **0.970** [0.955, 0.985] | **0.885** [0.849, 0.931] | 0 % | 34 [24, 54] | 0 / 20 |
+| One-Class SVM | 0.960 [0.936, 0.981] | 0.859 [0.818, 0.916] | 0.4 % | 52 [31, 79] | 0 / 20 |
 | **LSTM autoencoder** | **0.969** [0.954, 0.985] | **0.882** [0.840, 0.934] | 0 % | 46 [28, 67] | 0 / 20 |
 
 What this shows:
@@ -433,8 +437,8 @@ unlabelled-failure stream":
 
 | Family | Strength | Why not here |
 |---|---|---|
-| Isolation Forest / One-Class SVM | Fast, no hyperparameter tuning, works on tabular features | Measured here (section 6.6): an Isolation Forest reaches ROC-AUC 0.970, statistically indistinguishable from the LSTM autoencoder (0.969). The autoencoder is kept because it reconstructs each sensor, so an alarm can be traced to the sensors that drift — not because it ranks better. |
-| Variational autoencoder (VAE) | Probabilistic reconstruction error → calibrated likelihood | Not measured in this project. The KL term adds a second objective on a small dataset (5 032 training windows), and the ELBO interpretation is not used downstream — only the per-window score. |
+| Isolation Forest / One-Class SVM | Fast, no hyperparameter tuning, works on tabular features | Measured here (section 6.6): an Isolation Forest reaches ROC-AUC 0.970, statistically indistinguishable from the LSTM autoencoder (0.969); a One-Class SVM reaches 0.960. The autoencoder is kept because it reconstructs each sensor, so an alarm can be traced to the sensors that drift — not because it ranks better. |
+| Variational autoencoder (VAE) | Probabilistic reconstruction error → calibrated likelihood | Measured (LSTM-VAE, same architecture, 3 seeds, `scripts/ablations.py`): ROC-AUC 0.969 ± 0.001, AP 0.868 ± 0.006 — no gain over the deterministic autoencoder (0.968, AP 0.884). The ELBO interpretation is not used downstream — only the per-window score. |
 | **Deterministic reconstruction autoencoder** *(chosen)* | Single objective, single output, score-and-threshold pipeline | Matches the operational requirement exactly: one number per window, calibrated against held-out healthy data. |
 
 A supervised classifier is *not* an alternative on this regime —
@@ -443,27 +447,37 @@ not balanced enough to train against.
 
 ### 7.2 · Encoder topology · LSTM vs alternatives
 
+All five encoders below were trained by `python -m scripts.ablations`
+with the same 16-dimensional latent, optimiser, schedule and 80-epoch
+budget, 3 seeds each; ROC-AUC and AP are mean ± std over seeds, times
+are per training run on a laptop CPU. Seed-to-seed variation (± 0.001
+in ROC-AUC) is about thirty times smaller than the engine-level
+uncertainty of section 6.6 (± 0.015), which is the one that limits every
+comparison here.
+
 | Choice | Cost | Result on this dataset |
 |---|---|---|
-| MLP on flattened window | Smallest, fastest | Discards temporal order — the same window scrambled in time scores identically. Not measured; the closest measured analogue, a linear PCA reconstruction, reaches 0.895 (section 6.6). |
-| 1D-CNN (causal convolutions) | One third of the parameters, ~5× faster training | Not measured; listed as the next ablation in section 11. The reason it is not the default is mostly inertia: the LSTM is the published baseline (Malhotra et al., 2016) and the cost of using it is already negligible — 46 s on CPU. |
-| Transformer encoder | Quadratic attention; 5–10× more parameters at the same hidden size | Window length is 30. Self-attention has nothing to discover that a 64-unit LSTM cannot already represent — over-parametrisation is more likely than gain. |
-| **LSTM autoencoder** *(chosen)* | 44 510 parameters, < 1 min on CPU | Captures the temporal contour while staying small. The encoder collapses the window into a hidden state; the decoder rolls it back from a replicated latent vector. |
+| MLP on flattened window | 112 308 params, 11 s | Treats the 420 inputs as unordered features, with no bias toward smooth temporal structure. Measured: ROC-AUC 0.916 ± 0.002, AP 0.785 ± 0.007. |
+| 1D-CNN (two conv layers + linear bottleneck) | 46 526 params, 27 s | Measured: 0.814 ± 0.023, AP 0.612 ± 0.026 — the weakest, and the least stable across seeds. This configuration was not tuned (same recipe as the others), so it is a result about this design, not about CNNs. |
+| Transformer encoder | 72 862 params (1.6×), 177 s (2.8× slower) | Measured: ROC-AUC 0.972 ± 0.001, AP 0.893 ± 0.004 — the best score here, but +0.004 over the LSTM is well inside the engine-level interval (± 0.015), so the gain is not established. |
+| **LSTM autoencoder** *(chosen)* | 44 510 params, 64 s | 0.968 ± 0.001, AP 0.884 ± 0.007. Kept as the smaller, faster model at statistically the same ranking quality; the Transformer is the natural swap if more test engines confirm the gap. |
 
 ### 7.3 · Threshold rule · quantile vs alternatives
 
+Measured on the autoencoder score by `python -m scripts.baselines`:
+
 | Rule | Pros | Cons |
 |---|---|---|
-| Best F1 on a labelled set | Highest F1 by construction | Requires anomaly labels. The whole point of the unsupervised setting is that those labels are unreliable in production. |
-| 3 σ around the healthy mean | One-line rule | Healthy errors are not gaussian — the right tail is heavier. 3 σ either fires too often or never. |
-| **Quantile of the healthy validation distribution** *(chosen)* | The threshold becomes a false-positive *budget* the operator picks (`q99` ⇒ ≤ 1 % alarms on healthy data). Robust to non-gaussian tails. | Loses a small amount of recall vs labelled-tuning. Acceptable: recall is already 0.937. |
+| Best F1 on a labelled set | Measured as an oracle on the test labels: F1 0.789 (precision 0.777, recall 0.802) | Needs failure labels, and trades recall for precision — a 13-point drop in recall vs q99. |
+| 3 σ above the healthy mean | One-line rule. Measured: F1 0.739, recall 0.932 — practically the same as q99 here | Assumes a Gaussian tail; the healthy error is mildly right-skewed (skew 0.28), so the nominal 0.13 % false-alarm rate becomes 0.28 % on validation. |
+| **Quantile of the healthy validation distribution** *(chosen)* | The threshold is an explicit false-alarm budget (`q99` ⇒ 1.1 % on validation), with no distributional assumption. | F1 0.738, recall 0.937. |
 
 ### 7.4 · API framework · FastAPI vs alternatives
 
 | Framework | Strength | Why not |
 |---|---|---|
 | Flask + flask-pydantic | Familiar, large ecosystem | Pydantic validation is bolted on, the OpenAPI schema must be generated by hand, no native async. |
-| Django REST Framework | Batteries included | Auth layer, ORM, admin and template engine that this service does not need; image footprint roughly doubles. |
+| Django REST Framework | Batteries included | Auth layer, ORM, admin and template engine that this service does not need, and a larger image. |
 | BentoML / Ray Serve | ML-specific runtimes (model packaging, batching, autoscaling) | Heavy abstractions that hide the contract. For a single-model, single-window endpoint they add complexity without benefit. Worth revisiting once batching or A/B testing matters. |
 | **FastAPI + Pydantic** *(chosen)* | Typed schemas → free OpenAPI/Swagger; native async; minimal dependency footprint; first-class `TestClient` for in-process tests. | Cost: locked into Pydantic conventions, small learning curve. |
 
@@ -472,7 +486,7 @@ not balanced enough to train against.
 | Option | Strength | Why not |
 |---|---|---|
 | Gradio | Ideal for one-input/one-output ML demos | The demo here has CSV upload + sensor selector + score chart + flagged-region overlay — multi-widget layouts are awkward in Gradio. |
-| Dash (Plotly) | Production-grade, true reactive callbacks | Three to four times the code to express the same UI; requires Flask underneath and a separate process model. |
+| Dash (Plotly) | Production-grade, true reactive callbacks | More code to express the same UI; requires Flask underneath and a separate process model. |
 | A bespoke React front-end | Full control | An afternoon's work becomes a week. The ROI is wrong for a portfolio demo. |
 | **Streamlit** *(chosen)* | Linear Python script, native widgets, file uploader, line charts; can share the same image as the API. | Cost: not the right tool for a public end-user product, but spot-on for an internal operator/QA demo, which is what this project ships. |
 
@@ -481,9 +495,9 @@ not balanced enough to train against.
 | Option | Strength | Why not |
 |---|---|---|
 | Plain `pip install`, no container | Simplest | Reproducibility hinges on the host's Python version, BLAS and (potentially) CUDA libraries — exactly the kind of drift that produced the `torch + numpy` ABI break that bit the first build of this image. |
-| Single-stage Dockerfile | One file, simple to read | Ships build tools (`build-essential`, pip cache, wheel cache) into the runtime image — final size grows by ≈ 350 MB without benefit. |
+| Single-stage Dockerfile | One file, simple to read | Ships build tools (`build-essential`, pip cache, wheel cache) into the runtime image — a larger image without benefit. |
 | `conda` / `mamba` environment | Better at heavy native deps | Conda images are large and the torch-CPU wheel is already self-contained; the trade is unfavourable for a pure-Python + torch image. |
-| **Multi-stage Dockerfile + CPU-only torch wheel** *(chosen)* | The runtime stage carries only `python:3.11-slim`, the venv, the trained checkpoint and the application code. The CUDA wheels (~1.5 GB) are never pulled. | Cost: two stages to maintain. Worth it. |
+| **Multi-stage Dockerfile + CPU-only torch wheel** *(chosen)* | The runtime stage carries only `python:3.11-slim`, the venv, the trained checkpoint and the application code. The multi-gigabyte CUDA wheels are never pulled. | Cost: two stages to maintain. Worth it. |
 
 The two-step pip install in the Dockerfile (torch from PyTorch's CPU
 index, then the rest from PyPI against pinned upper bounds) is what
@@ -607,6 +621,9 @@ python main.py --no-train
 # baselines, engine-bootstrap intervals and lead times (section 6.6, ≈ 1 min)
 python -m scripts.baselines
 
+# encoder ablation, 5 architectures x 3 seeds (section 7.2, ≈ 20 min CPU)
+python -m scripts.ablations
+
 # regenerate the JSON bundle the portfolio chart consumes
 python -m scripts.export_json
 
@@ -646,7 +663,8 @@ data/
   ├── eval_report.json       # threshold + binary metrics
   ├── eval_arrays.npz        # per-window errors + ROC sweep
   ├── train_metrics.json     # per-epoch loss curve
-  └── baselines.json         # section 6.6 (from scripts.baselines)
+  ├── baselines.json         # sections 6.6 and 7.3 (from scripts.baselines)
+  └── ablations.json         # section 7.2 (from scripts.ablations)
 checkpoints/
   └── autoencoder.pt         # weights + normalisation stats
 ```
@@ -680,11 +698,10 @@ weight decay are deliberately tuned to make that rare.
 
 ## 11 · Optional follow-ups
 
-**Ablation: 1D-CNN encoder.** A small temporal-convolutional encoder
-with one third of the parameters and a fraction of the training time
-(not measured here). The `src.autoencoder` interface only
-needs a different `encoder` module with the same `(B, T, C) → (B, H)`
-contract.
+**Tune the 1D-CNN.** The untuned two-layer CNN of section 7.2 is the
+weakest encoder (0.814). Dilated convolutions and temporal pooling
+would show whether the gap closes; the model definitions live in
+`scripts/ablations.py`.
 
 **Multi-condition CMAPSS (FD002 / FD004).** Six operating conditions
 make these much harder: the autoencoder either needs the operating
@@ -723,7 +740,8 @@ section 6.4 without changing the autoencoder.
 │   └── app_streamlit.py             # interactive demo
 ├── scripts/
 │   ├── __init__.py
-│   ├── baselines.py                 # baselines, engine bootstrap, lead time
+│   ├── baselines.py                 # baselines, engine bootstrap, lead time, threshold rules
+│   ├── ablations.py                 # encoder ablation: MLP, 1D-CNN, Transformer, VAE
 │   ├── export_json.py               # arrays → JSON for the portfolio chart
 │   └── demo_preview.py              # static replica of the demo (figures/demo.png)
 ├── tests/
@@ -745,7 +763,8 @@ section 6.4 without changing the autoencoder.
     ├── eval_report.json
     ├── eval_arrays.npz
     ├── train_metrics.json
-    └── baselines.json
+    ├── baselines.json
+    └── ablations.json
 ```
 
 ## 13 · References
@@ -771,5 +790,4 @@ section 6.4 without changing the autoencoder.
 - Davis, J. & Goadrich, M. (2006). *The Relationship Between
   Precision-Recall and ROC Curves.* Proceedings of the 23rd ICML,
   233–240. (Why AP rather than trapezoidal PR-AUC.)
-- Ramachandran, P. et al. (2020). *FastAPI for Python production
-  services.* Documentation, https://fastapi.tiangolo.com .
+- Ramírez, S. *FastAPI* (software). https://fastapi.tiangolo.com .

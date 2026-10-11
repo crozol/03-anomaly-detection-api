@@ -10,12 +10,18 @@ same engine-disjoint split and the same labels as the LSTM autoencoder:
   as the LSTM latent (16), fitted on the flattened healthy training
   windows; score = mean squared reconstruction error.
 * **Isolation Forest** — fitted on the same flattened healthy windows.
+* **One-Class SVM** — RBF kernel (``gamma="scale"``, ``nu=0.05``) on the
+  same flattened healthy windows.
 * **LSTM autoencoder** — the trained checkpoint.
 
 Uncertainty. Windows overlap 29/30 and the 3 913 test windows come from
 only 20 engines, so the effective sample size is ~20, not ~3 900. The 95 %
 intervals are a bootstrap over *engines* (resample the 20 test engines with
 replacement, recompute the metric).
+
+Threshold rules (README section 7.3), on the autoencoder score: the q99
+validation quantile, mean + 3 sigma of the validation score, and the
+best-F1 cut chosen with the test labels (an oracle upper bound).
 
 Lead time. For each test engine, the alarm cycle is the first window
 after which the score stays above the q99 validation threshold until the
@@ -34,6 +40,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.ensemble import IsolationForest
+from sklearn.svm import OneClassSVM
 
 from src.data import build_dataset
 from src.evaluate import auc, average_precision, calibrate_threshold, roc_curve
@@ -86,6 +93,26 @@ def lead_times(score: np.ndarray, rul: np.ndarray, unit: np.ndarray,
     return out
 
 
+def threshold_rules(s_val: np.ndarray, s_test: np.ndarray, y: np.ndarray,
+                    quantile: float) -> dict:
+    """README section 7.3: q99 vs mean + 3 sigma vs an oracle best-F1 cut."""
+    def at(thr: float) -> dict:
+        p = s_test > thr
+        tp, fp = int((p & (y == 1)).sum()), int((p & (y == 0)).sum())
+        prec, rec = tp / max(tp + fp, 1), tp / int(y.sum())
+        return {"threshold": float(thr), "precision": prec, "recall": rec,
+                "f1": 2 * prec * rec / max(prec + rec, 1e-12),
+                "val_alarm_rate": float((s_val > thr).mean())}
+    cands = np.unique(s_test)
+    f1s = [at(t)["f1"] for t in cands]
+    return {
+        "quantile": at(calibrate_threshold(s_val, quantile)),
+        "mean_plus_3sigma": at(float(s_val.mean() + 3 * s_val.std())),
+        "oracle_best_f1_on_test": at(float(cands[int(np.argmax(f1s))])),
+        "val_skewness": float(((s_val - s_val.mean()) ** 3).mean() / s_val.std() ** 3),
+    }
+
+
 def evaluate_score(name: str, s_val: np.ndarray, s_test: np.ndarray, ds,
                    y: np.ndarray, quantile: float, n_boot: int) -> dict:
     roc, ap = _ranking(s_test, y)
@@ -128,11 +155,13 @@ def main(raw_dir: str, checkpoint: str, out: str, quantile: float,
     pca_err = lambda x: np.mean((x - pca.inverse_transform(pca.transform(x))) ** 2, axis=1)  # noqa: E731
 
     iso = IsolationForest(n_estimators=300, random_state=0).fit(x_train)
+    ocsvm = OneClassSVM(kernel="rbf", gamma="scale", nu=0.05).fit(x_train)
 
     scores = {
         "Cycle index": (ds.val.cycle_end.astype(float), ds.test.cycle_end.astype(float)),
         f"PCA ({latent} comp.)": (pca_err(x_val), pca_err(x_test)),
         "Isolation Forest": (-iso.score_samples(x_val), -iso.score_samples(x_test)),
+        "One-Class SVM": (-ocsvm.score_samples(x_val), -ocsvm.score_samples(x_test)),
         "LSTM autoencoder": (reconstruction_errors(model, ds.val.x),
                              reconstruction_errors(model, ds.test.x)),
     }
@@ -142,7 +171,12 @@ def main(raw_dir: str, checkpoint: str, out: str, quantile: float,
     results = [evaluate_score(name, sv, st, ds, y, quantile, n_boot)
                for name, (sv, st) in scores.items()]
 
+    rules = threshold_rules(*scores["LSTM autoencoder"], y, quantile)
+    for k, v in rules.items():
+        print(f"  threshold rule {k}: {v}")
+
     payload_out = {
+        "threshold_rules_lstm": rules,
         "quantile": quantile,
         "n_boot": n_boot,
         "n_test_engines": int(len(np.unique(ds.test.unit))),
