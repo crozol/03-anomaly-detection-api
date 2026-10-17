@@ -25,7 +25,9 @@ best-F1 cut chosen with the test labels (an oracle upper bound).
 
 Lead time. For each test engine, the alarm cycle is the first window
 after which the score stays above the q99 validation threshold until the
-end of the record; the lead time is the RUL at that window.
+end of the record; the lead time is the RUL at that window. The autoencoder is compared with
+the Isolation Forest and the One-Class SVM engine by engine: median
+difference with a bootstrap interval and an exact sign test.
 
 Usage:
     python -m scripts.baselines            # writes data/baselines.json
@@ -35,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -91,6 +94,29 @@ def lead_times(score: np.ndarray, rul: np.ndarray, unit: np.ndarray,
         out.update(median=float(med), iqr=[float(q1), float(q3)],
                    min=float(leads.min()), max=float(leads.max()))
     return out
+
+
+def paired_lead_difference(lead_a: dict, lead_b: dict, n_boot: int = 10000,
+                           seed: int = 0) -> dict:
+    """Per-engine lead-time difference a - b, paired on the same engines.
+
+    Only engines alarmed by both scores enter. Reports the median difference
+    with a bootstrap-over-engines 95 % interval, how many engines each score
+    alarms first, and the exact two-sided sign test (ties dropped).
+    """
+    common = sorted(u for u in lead_a if lead_a[u] is not None and lead_b.get(u) is not None)
+    d = np.array([lead_a[u] - lead_b[u] for u in common])
+    rng = np.random.default_rng(seed)
+    boot = [np.median(rng.choice(d, size=d.size, replace=True)) for _ in range(n_boot)]
+    n_pos, n_neg = int((d > 0).sum()), int((d < 0).sum())
+    n, k = n_pos + n_neg, min(n_pos, n_neg)
+    p = min(1.0, 2 * sum(math.comb(n, i) for i in range(k + 1)) / 2 ** n) if n else 1.0
+    q1, q3 = np.percentile(d, [25, 75])
+    return {"n_engines": int(d.size), "median": float(np.median(d)),
+            "iqr": [float(q1), float(q3)],
+            "median_ci95": [float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))],
+            "a_earlier": n_pos, "b_earlier": n_neg, "ties": int((d == 0).sum()),
+            "sign_test_p": float(p)}
 
 
 def threshold_rules(s_val: np.ndarray, s_test: np.ndarray, y: np.ndarray,
@@ -175,8 +201,18 @@ def main(raw_dir: str, checkpoint: str, out: str, quantile: float,
     for k, v in rules.items():
         print(f"  threshold rule {k}: {v}")
 
+    by_name = {r["name"]: r["lead_time"]["per_engine"] for r in results}
+    paired = {other: paired_lead_difference(by_name["LSTM autoencoder"], by_name[other])
+              for other in ("Isolation Forest", "One-Class SVM")}
+    for other, v in paired.items():
+        print(f"  lead time, LSTM AE - {other}: median {v['median']:+.1f} "
+              f"[{v['median_ci95'][0]:+.1f}, {v['median_ci95'][1]:+.1f}]  "
+              f"AE first {v['a_earlier']}, other first {v['b_earlier']}, "
+              f"ties {v['ties']}  sign test p = {v['sign_test_p']:.3f}")
+
     payload_out = {
         "threshold_rules_lstm": rules,
+        "paired_lead_time_lstm_minus": paired,
         "quantile": quantile,
         "n_boot": n_boot,
         "n_test_engines": int(len(np.unique(ds.test.unit))),
