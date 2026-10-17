@@ -417,11 +417,16 @@ What this shows:
 - The non-linear model matters: a linear reconstruction with the same
   latent size ranks worse and misses 4 of the 20 engines entirely.
 - **An Isolation Forest on the same windows is statistically
-  indistinguishable from the autoencoder** in ranking quality. The
-  autoencoder raises its persistent alarm somewhat earlier (median 46 vs
-  34 cycles), but the spread across engines is wide enough that this
-  difference is not established either. The reason to keep the
-  autoencoder is not a better score (section 7.1).
+  indistinguishable from the autoencoder** in ranking quality, and in
+  lead time too. The medians (46 vs 34 cycles) suggest an earlier alarm,
+  but engine by engine the difference is a median of +1 cycle (95 %
+  bootstrap interval [−1, +5.5]): the autoencoder alarms first on 11
+  engines, the forest on 7, with 2 ties (sign test p = 0.48), and the
+  autoencoder raises more false alarms in the grey zone RUL 30–100
+  (26.7 % vs 21.7 %). The One-Class SVM alarms earlier than the
+  autoencoder on 19 of 20 engines (median 7.5 cycles), at 38 % grey-zone
+  false alarms. The reason to keep the autoencoder is not a better score
+  (section 7.1).
 
 ## 7 · Design choices and alternatives
 
