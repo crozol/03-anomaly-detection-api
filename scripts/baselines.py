@@ -23,11 +23,12 @@ Threshold rules (README section 7.3), on the autoencoder score: the q99
 validation quantile, mean + 3 sigma of the validation score, and the
 best-F1 cut chosen with the test labels (an oracle upper bound).
 
-Lead time. For each test engine, the alarm cycle is the first window
-after which the score stays above the q99 validation threshold until the
-end of the record; the lead time is the RUL at that window. The autoencoder is compared with
-the Isolation Forest and the One-Class SVM engine by engine: median
-difference with a bootstrap interval and an exact sign test.
+Lead time (superseded). For each test engine, the alarm cycle is the first
+window after which the score stays above the q99 validation threshold until
+the end of the record; the lead time is the RUL at that window. That rule
+needs the future to the end of the record, so the README's lead times come
+from the causal rule of ``scripts/alarm_rule.py``; this one is kept in
+``data/baselines.json`` for comparison.
 
 Usage:
     python -m scripts.baselines            # writes data/baselines.json

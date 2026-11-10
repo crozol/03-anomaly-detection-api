@@ -5,7 +5,7 @@
 [![Portfolio page](https://img.shields.io/badge/Portfolio-page-7C3AED?style=flat-square)](https://crozol.github.io/projects/03-anomaly-detection-api.html)
 [![Live demo on Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Live%20demo-Hugging%20Face%20Space-FFD21E?style=flat-square)](https://huggingface.co/spaces/crozol/cmapss-anomaly-detector)
 
-**TL;DR** — Reconstruction-based anomaly detection on the NASA CMAPSS FD001 turbofan dataset. An LSTM autoencoder is trained on healthy sliding windows; the decision threshold is fixed as the 99th-percentile of the validation reconstruction error (operator-tuneable false-positive budget). On 20 held-out engines: **ROC-AUC = 0.969 [0.954, 0.985]** (95 % CI, bootstrap over engines) · **AP = 0.882** · recall **0.937** at precision **0.608**. It clearly beats a trivial cycle-count score (0.839) and a linear PCA reconstruction (0.895); it does not beat an Isolation Forest on the same windows (0.970). At the q99 threshold every test engine is flagged before failure, with a median of **46 cycles** of warning, tied with the Isolation Forest engine by engine (paired median +1 cycle, p = 0.48). Wrapped in a typed FastAPI service, a Streamlit demo, and a two-service multi-stage Docker stack. Stack: PyTorch · FastAPI · Streamlit · Docker.
+**TL;DR** — Reconstruction-based anomaly detection on the NASA CMAPSS FD001 turbofan dataset. An LSTM autoencoder is trained on healthy sliding windows; the decision threshold is fixed as the 99th-percentile of the validation reconstruction error (operator-tuneable false-positive budget). On 20 held-out engines: **ROC-AUC = 0.969 [0.954, 0.985]** (95 % CI, bootstrap over engines) · **AP = 0.882** · recall **0.937** at precision **0.608**. It clearly beats a trivial cycle-count score (0.839) and a linear PCA reconstruction (0.895); it does not beat an Isolation Forest on the same windows (0.970; paired difference −0.002, 95 % CI [−0.012, +0.009]). With a causal alarm (three consecutive windows above the q99 threshold) every test engine is flagged before failure, a median of **44 cycles** ahead. A One-Class SVM alarms earlier at its own q99 threshold, but it also raises false alarms on healthy windows; compared at equal false-alarm rates, no score warns significantly earlier than the autoencoder. Wrapped in a typed FastAPI service, a Streamlit demo, and a two-service multi-stage Docker stack. Stack: PyTorch · FastAPI · Streamlit · Docker.
 
 A reconstruction-based anomaly detector for multivariate sensor streams.
 An LSTM autoencoder is trained on healthy sliding windows of the NASA
@@ -396,17 +396,23 @@ from only 20 engines, so the effective sample size is of order 20, not
 3 913. The intervals below come from resampling the 20 test *engines*
 with replacement (1 000 replicates) and recomputing each metric.
 
-**Lead time.** For each test engine, the alarm is the first window after
-which the score stays above threshold until the end of the record; the
-lead time is the RUL at that window. Twenty numbers, one per engine.
+**Lead time.** An engine's alarm is its first window that completes a
+run of three consecutive windows above the threshold: the alarm is raised
+when the run is known, with no look-ahead (the same rule as the analysis
+plan of the TDA project). An alarm on a healthy window (RUL > 100) is a
+false alarm; the lead time is the RUL of the first alarm with RUL ≤ 100,
+and an engine with none is missed. Grey-zone windows (30 < RUL ≤ 100)
+count neither way: an alarm there is early warning by the RUL ≤ 30 label
+of section 6.3, not a failure of the detector. Twenty numbers, one per
+engine (`scripts/alarm_rule.py`).
 
 | Score | ROC-AUC [95 % CI] | AP [95 % CI] | False alarms, RUL > 100 | Lead time, median [IQR] | Engines missed |
 |---|---|---|---|---|---|
-| Cycle index | 0.839 [0.803, 0.897] | 0.484 [0.459, 0.625] | 25.8 % | 88 [57, 144] | 0 / 20 |
-| PCA (16 comp.) | 0.895 [0.841, 0.944] | 0.743 [0.665, 0.817] | 0 % | 16 [4, 24] | 4 / 20 |
-| Isolation Forest | **0.970** [0.955, 0.985] | **0.885** [0.849, 0.931] | 0 % | 34 [24, 54] | 0 / 20 |
-| One-Class SVM | 0.960 [0.936, 0.981] | 0.859 [0.818, 0.916] | 0.4 % | 52 [31, 79] | 0 / 20 |
-| **LSTM autoencoder** | **0.969** [0.954, 0.985] | **0.882** [0.840, 0.934] | 0 % | 46 [28, 67] | 0 / 20 |
+| Cycle index | 0.839 [0.803, 0.897] | 0.484 [0.459, 0.625] | 24.9 % | 85.5 [55, 100] | 0 / 20 |
+| PCA (16 comp.) | 0.895 [0.841, 0.944] | 0.743 [0.665, 0.817] | 0 % | 18 [10, 29] | 3 / 20 |
+| Isolation Forest | **0.970** [0.955, 0.985] | **0.885** [0.849, 0.931] | 0 % | 32.5 [22, 52] | 0 / 20 |
+| One-Class SVM | 0.960 [0.936, 0.981] | 0.859 [0.818, 0.916] | 0.26 % | 50 [29, 77] | 0 / 20 |
+| **LSTM autoencoder** | **0.969** [0.954, 0.985] | **0.882** [0.840, 0.934] | 0 % | 44 [25.5, 65] | 0 / 20 |
 
 What this shows:
 
@@ -415,18 +421,33 @@ What this shows:
   is not a feature — it buys it with false alarms on a quarter of the
   healthy windows.
 - The non-linear model matters: a linear reconstruction with the same
-  latent size ranks worse and misses 4 of the 20 engines entirely.
-- **An Isolation Forest on the same windows is statistically
-  indistinguishable from the autoencoder** in ranking quality, and in
-  lead time too. The medians (46 vs 34 cycles) suggest an earlier alarm,
-  but engine by engine the difference is a median of +1 cycle (95 %
-  bootstrap interval [−1, +5.5]): the autoencoder alarms first on 11
-  engines, the forest on 7, with 2 ties (sign test p = 0.48), and the
-  autoencoder raises more false alarms in the grey zone RUL 30–100
-  (26.7 % vs 21.7 %). The One-Class SVM alarms earlier than the
-  autoencoder on 19 of 20 engines (median 7.5 cycles), at 38 % grey-zone
-  false alarms. The reason to keep the autoencoder is not a better score
-  (section 7.1).
+  latent size ranks worse and misses 3 of the 20 engines entirely.
+- **An Isolation Forest on the same windows ranks as well as the
+  autoencoder.** Paired over engines, the ROC-AUC difference is −0.002
+  (95 % interval [−0.012, +0.009]): the two differ by at most about 0.01.
+  Engine by engine at the q99 threshold, the autoencoder alarms first on
+  11 engines and the forest on 7, with 2 ties (sign test p = 0.48).
+- **At its own q99 threshold the One-Class SVM alarms earlier than the
+  autoencoder on 19 of 20 engines** (median 7 cycles, sign test
+  p = 4·10⁻⁵), but that threshold also lets it raise false alarms on
+  healthy windows (0.26 %, on one engine) where the autoencoder raises
+  none. Each score's q99 falls at a different point of its own trade-off
+  between lead time and false alarms, so the comparison has to be made at
+  equal false-alarm rates (figure below). With no false alarm on healthy
+  windows, the One-Class SVM alarms first on 14 engines and the
+  autoencoder on 5 (p = 0.064); at 0.5 % and 1 %, 12 to 8 and 11 to 7
+  (p ≥ 0.48), and the autoencoder's median lead is the longer one (58 and
+  65.5 cycles against 51 and 53.5). It also ranks slightly worse (ROC-AUC
+  0.009 below the autoencoder, paired interval [0.001, 0.021]). No score
+  warns significantly earlier than the autoencoder at the same
+  false-alarm rate. The reason to keep the autoencoder is still not a
+  better score (section 7.1).
+
+![Lead time against false alarms](figures/lead_vs_false_alarms.png)
+
+Median lead time against the false-alarm rate on healthy windows,
+sweeping each score's threshold; dots mark each score's q99 validation
+threshold.
 
 ## 7 · Design choices and alternatives
 
@@ -442,7 +463,7 @@ unlabelled-failure stream":
 
 | Family | Strength | Why not here |
 |---|---|---|
-| Isolation Forest / One-Class SVM | Fast, no hyperparameter tuning, works on tabular features | Measured here (section 6.6): an Isolation Forest reaches ROC-AUC 0.970, statistically indistinguishable from the LSTM autoencoder (0.969); a One-Class SVM reaches 0.960. The autoencoder is kept because it reconstructs each sensor, so an alarm can be traced to the sensors that drift — not because it ranks better. |
+| Isolation Forest / One-Class SVM | Fast, no hyperparameter tuning, works on tabular features | Measured here (section 6.6): an Isolation Forest reaches ROC-AUC 0.970, within 0.01 of the LSTM autoencoder (paired difference −0.002, 95 % CI [−0.012, +0.009]); a One-Class SVM reaches 0.960. The autoencoder is kept because it reconstructs each sensor, so an alarm can be traced to the sensors that drift — not because it ranks better. |
 | Variational autoencoder (VAE) | Probabilistic reconstruction error → calibrated likelihood | Measured (LSTM-VAE, same architecture, 3 seeds, `scripts/ablations.py`): ROC-AUC 0.969 ± 0.001, AP 0.868 ± 0.006 — no gain over the deterministic autoencoder (0.968, AP 0.884). The ELBO interpretation is not used downstream — only the per-window score. |
 | **Deterministic reconstruction autoencoder** *(chosen)* | Single objective, single output, score-and-threshold pipeline | Matches the operational requirement exactly: one number per window, calibrated against held-out healthy data. |
 
@@ -623,8 +644,11 @@ python main.py
 # skip training and reuse the checkpoint (≈ 3 s)
 python main.py --no-train
 
-# baselines, engine-bootstrap intervals and lead times (section 6.6, ≈ 1 min)
+# baselines and engine-bootstrap intervals (section 6.6, ≈ 1 min)
 python -m scripts.baselines
+
+# causal alarm, lead time at equal false-alarm rates, paired ROC-AUC (section 6.6)
+python -m scripts.alarm_rule
 
 # encoder ablation, 5 architectures x 3 seeds (section 7.2, ≈ 20 min CPU)
 python -m scripts.ablations
@@ -745,13 +769,15 @@ section 6.4 without changing the autoencoder.
 │   └── app_streamlit.py             # interactive demo
 ├── scripts/
 │   ├── __init__.py
-│   ├── baselines.py                 # baselines, engine bootstrap, lead time, threshold rules
+│   ├── baselines.py                 # baselines, engine bootstrap, threshold rules
+│   ├── alarm_rule.py                # causal alarm, lead time vs false alarms, paired ROC-AUC
 │   ├── ablations.py                 # encoder ablation: MLP, 1D-CNN, Transformer, VAE
 │   ├── export_json.py               # arrays → JSON for the portfolio chart
 │   └── demo_preview.py              # static replica of the demo (figures/demo.png)
 ├── tests/
 │   ├── __init__.py
 │   ├── test_api.py                  # /health · /info · /predict (5 cases)
+│   ├── test_lead_time.py            # lead-time rules (the causal alarm has no look-ahead)
 │   └── test_metrics.py              # ROC-AUC and AP agree with scikit-learn
 ├── figures/                         # tracked PNGs embedded in this README
 │   ├── sensors.png
@@ -760,7 +786,8 @@ section 6.4 without changing the autoencoder.
 │   ├── roc.png
 │   ├── confusion.png
 │   ├── engine_trajectory.png
-│   └── demo.png
+│   ├── demo.png
+│   └── lead_vs_false_alarms.png
 ├── checkpoints/                     # (gitignored) trained autoencoder.pt
 └── data/                            # (gitignored)
     ├── raw/                         # CMAPSS .txt files
@@ -769,6 +796,7 @@ section 6.4 without changing the autoencoder.
     ├── eval_arrays.npz
     ├── train_metrics.json
     ├── baselines.json
+    ├── alarm_rule.json
     └── ablations.json
 ```
 
