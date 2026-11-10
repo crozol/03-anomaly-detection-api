@@ -126,19 +126,35 @@ def paired_auc_difference(sa: np.ndarray, sb: np.ndarray, y: np.ndarray, unit: n
             "ci95": [float(np.percentile(diffs, 2.5)), float(np.percentile(diffs, 97.5))]}
 
 
-def figure(curves: dict, out: str) -> None:
+def figure(res: dict, out: str) -> None:
+    """Median lead time against the healthy false-alarm rate, one curve per
+    score, with each score's q99-validation operating point marked."""
     import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=(6.4, 4.2))
-    for name, pts in curves.items():
-        x = [max(p["healthy_false_alarm_rate"], 1e-4) for p in pts]
-        ax.plot(x, [p["lead_median"] or 0 for p in pts], marker="o", ms=2.5, lw=1.2, label=name)
-    ax.set_xscale("log")
-    ax.set_xlabel("false-alarm rate on healthy windows (RUL > 100), causal rule; 0 plotted at 1e-4")
+
+    from src.plots import AMBER, CYAN, FG_1, PURPLE, _save, _style
+
+    _style()
+    colors = {"LSTM autoencoder": PURPLE, "Isolation Forest": CYAN,
+              "One-Class SVM": AMBER}
+    fig, ax = plt.subplots(figsize=(8.2, 4.8))
+    for name, pts in res["curves"].items():
+        c = colors.get(name, FG_1)
+        pts = sorted(pts, key=lambda p: (p["healthy_false_alarm_rate"], p["lead_median"] or 0))
+        ax.step([100 * p["healthy_false_alarm_rate"] for p in pts],
+                [p["lead_median"] or 0 for p in pts], where="post", color=c, lw=1.8, label=name)
+        op = res["at_validation_quantile"][name]
+        ax.plot(100 * op["healthy_false_alarm_rate"], op["lead_median"] or 0, "o", color=c,
+                ms=7, mec="white", mew=0.8, zorder=4)
+    ax.set_xscale("symlog", linthresh=0.1, linscale=0.6)
+    ax.set_xlim(0, 60)
+    ax.set_xticks([0, 0.1, 0.5, 1, 5, 10, 50], ["0", "0.1", "0.5", "1", "5", "10", "50"])
+    ax.set_xlabel("false alarms on healthy windows, RUL > 100 (%)")
     ax.set_ylabel("median lead time (cycles)")
-    ax.legend(frameon=False, fontsize=8)
-    fig.tight_layout()
-    Path(out).parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=140)
+    ax.set_title(f"Lead time at equal false-alarm rates (alarm: {res['k']} consecutive windows)",
+                 loc="left")
+    ax.legend(loc="lower right", title="dots: q99 of each score's validation set",
+              title_fontsize=9)
+    _save(fig, out)
 
 
 def main(raw_dir: str, checkpoint: str, out: str, fig: str, quantile: float, n_boot: int) -> None:
@@ -148,7 +164,7 @@ def main(raw_dir: str, checkpoint: str, out: str, fig: str, quantile: float, n_b
     ref = "LSTM autoencoder"
 
     q99 = {n: operating_point(scores[n][1], rul, unit, calibrate_threshold(scores[n][0], quantile))
-           for n in names}
+           for n in scores}                                    # the cycle index too, for the table
     matched = {f"{r:g}": {n: at_false_alarm_rate(scores[n][1], rul, unit, r) for n in names}
                for r in FA_LEVELS}
     res = {
@@ -164,7 +180,7 @@ def main(raw_dir: str, checkpoint: str, out: str, fig: str, quantile: float, n_b
                                     for n in names if n != ref},
         "curves": {n: sweep(scores[n][1], rul, unit) for n in names},
     }
-    for n in names:
+    for n in scores:
         o = q99[n]
         print(f"  q{quantile:g} {n:<18} healthy FA {o['healthy_false_alarm_rate']:.4f}  grey {o['grey_zone_alarm_rate']:.3f}"
               f"  lead median {o['lead_median']}  missed {o['n_missed']}  engines w/ healthy alarm {o['engines_with_a_healthy_alarm']}")
@@ -179,7 +195,7 @@ def main(raw_dir: str, checkpoint: str, out: str, fig: str, quantile: float, n_b
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w") as fh:
         json.dump(res, fh, indent=2)
-    figure(res["curves"], fig)
+    figure(res, fig)
     print(f"[ok] {out}, {fig}")
 
 
@@ -192,5 +208,9 @@ if __name__ == "__main__":
     p.add_argument("--figure", default="figures/lead_vs_false_alarms.png")
     p.add_argument("--quantile", type=float, default=0.99)
     p.add_argument("--n-boot", type=int, default=1000)
+    p.add_argument("--plot-only", action="store_true", help="redraw the figure from --out")
     a = p.parse_args()
-    main(a.raw_dir, a.checkpoint, a.out, a.figure, a.quantile, a.n_boot)
+    if a.plot_only:
+        figure(json.loads(Path(a.out).read_text()), a.figure)
+    else:
+        main(a.raw_dir, a.checkpoint, a.out, a.figure, a.quantile, a.n_boot)
