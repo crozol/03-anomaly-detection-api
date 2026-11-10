@@ -166,8 +166,9 @@ def evaluate_score(name: str, s_val: np.ndarray, s_test: np.ndarray, ds,
     return res
 
 
-def main(raw_dir: str, checkpoint: str, out: str, quantile: float,
-         n_boot: int) -> None:
+def compute_scores(raw_dir: str, checkpoint: str):
+    """(dataset, test labels, {name: (validation score, test score)}) for the
+    five scores of the comparison table."""
     ds = build_dataset(raw_dir=raw_dir)
     y = ds.test_label
 
@@ -191,7 +192,12 @@ def main(raw_dir: str, checkpoint: str, out: str, quantile: float,
         "LSTM autoencoder": (reconstruction_errors(model, ds.val.x),
                              reconstruction_errors(model, ds.test.x)),
     }
+    return ds, y, scores
 
+
+def main(raw_dir: str, checkpoint: str, out: str, quantile: float,
+         n_boot: int) -> None:
+    ds, y, scores = compute_scores(raw_dir, checkpoint)
     print(f"[baselines] {len(np.unique(ds.test.unit))} test engines, "
           f"{len(y)} windows, {int(y.sum())} positives, {n_boot} engine bootstraps")
     results = [evaluate_score(name, sv, st, ds, y, quantile, n_boot)

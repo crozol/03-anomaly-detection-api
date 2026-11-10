@@ -27,3 +27,22 @@ def test_paired_difference_and_sign_test() -> None:
     assert (out["a_earlier"], out["b_earlier"], out["ties"]) == (3, 1, 1)
     # exact two-sided sign test, n = 4, k = 1: 2 * (1 + 4) / 16
     assert abs(out["sign_test_p"] - 10 / 16) < 1e-12
+
+
+def test_causal_alarm_needs_k_consecutive_windows_and_no_look_ahead() -> None:
+    from scripts.alarm_rule import alarm_state, operating_point
+    score = np.array([1, 0, 1, 1, 1, 0, 1], dtype=float)
+    # alarm is known at the third consecutive window above, not before
+    assert alarm_state(score, 0.5, k=3).tolist() == [False, False, False, False, True, False, False]
+    # one engine, RUL 140 .. 20 in steps of 20: 3 windows above inside the healthy
+    # regime (RUL > 100) charge the false-alarm rate; the lead counts from RUL <= 100
+    rul = np.array([140, 120, 100, 80, 60, 40, 20], dtype=float)
+    s = np.array([1, 1, 1, 0, 1, 1, 1], dtype=float)
+    op = operating_point(s, rul, np.zeros(7, dtype=int), 0.5, k=3)
+    assert op["lead_per_engine"] == {0: 100.0}
+    assert op["healthy_false_alarm_rate"] == 0.0          # the alarm completes at RUL 100
+    # an alarm completed inside the healthy regime is a false alarm, not a lead
+    rul2 = np.array([180, 160, 140, 120, 100, 80], dtype=float)
+    s2 = np.array([1, 1, 1, 0, 0, 1], dtype=float)
+    op2 = operating_point(s2, rul2, np.zeros(6, dtype=int), 0.5, k=3)
+    assert op2["healthy_false_alarm_rate"] == 0.25 and op2["n_missed"] == 1
