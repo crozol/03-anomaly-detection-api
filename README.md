@@ -5,7 +5,7 @@
 [![Portfolio page](https://img.shields.io/badge/Portfolio-page-7C3AED?style=flat-square)](https://crozol.github.io/projects/03-anomaly-detection-api.html)
 [![Live demo on Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Live%20demo-Hugging%20Face%20Space-FFD21E?style=flat-square)](https://huggingface.co/spaces/crozol/cmapss-anomaly-detector)
 
-**TL;DR** — Reconstruction-based anomaly detection on the NASA CMAPSS FD001 turbofan dataset. An LSTM autoencoder is trained on healthy sliding windows; the decision threshold is fixed as the 99th-percentile of the validation reconstruction error (operator-tuneable false-positive budget). On 20 held-out engines: **ROC-AUC = 0.969 [0.954, 0.985]** (95 % CI, bootstrap over engines) · **AP = 0.882** · recall **0.937** at precision **0.608**. It clearly beats a trivial cycle-count score (0.839) and a linear PCA reconstruction (0.895); it does not beat an Isolation Forest on the same windows (0.970; paired difference −0.002, 95 % CI [−0.012, +0.009]). With a causal alarm (three consecutive windows above the q99 threshold) every test engine is flagged before failure, a median of **44 cycles** ahead. A One-Class SVM alarms earlier at its own q99 threshold, but it also raises false alarms on healthy windows; compared at equal false-alarm rates, no score warns significantly earlier than the autoencoder. Wrapped in a typed FastAPI service, a Streamlit demo, and a two-service multi-stage Docker stack. Stack: PyTorch · FastAPI · Streamlit · Docker.
+**TL;DR** — Reconstruction-based anomaly detection on the NASA CMAPSS FD001 turbofan dataset. An LSTM autoencoder is trained on healthy sliding windows; the decision threshold is fixed as the 99th-percentile of the validation reconstruction error (operator-tuneable false-positive budget). On 20 held-out engines: **ROC-AUC = 0.969 [0.954, 0.985]** (95 % CI, bootstrap over engines) · **AP = 0.882** · recall **0.937** at precision **0.608**. It clearly beats a trivial cycle-count score (0.839) and a linear PCA reconstruction (0.895); it does not beat an Isolation Forest on the same windows (0.970; paired difference −0.002, 95 % CI [−0.012, +0.009]). With a causal alarm (three consecutive windows above the q99 threshold) every test engine is flagged before failure, a median of **44 cycles** ahead. With 20 engines no score dominates: a One-Class SVM ranks slightly worse than the autoencoder (ROC-AUC 0.009 lower, paired 95 % CI [0.001, 0.021]) but, with no false alarm on healthy windows, warns first on 14 of 19 engines, a median 2.5 cycles earlier per engine (paired 95 % CI [1.0, 8.5]; sign test p = 0.064, 0.19 after Holm's correction over the three false-alarm rates compared). Wrapped in a typed FastAPI service, a Streamlit demo, and a two-service multi-stage Docker stack. Stack: PyTorch · FastAPI · Streamlit · Docker.
 
 A reconstruction-based anomaly detector for multivariate sensor streams.
 An LSTM autoencoder is trained on healthy sliding windows of the NASA
@@ -438,10 +438,16 @@ What this shows:
   autoencoder on 5 (p = 0.064); at 0.5 % and 1 %, 12 to 8 and 11 to 7
   (p ≥ 0.48), and the autoencoder's median lead is the longer one (58 and
   65.5 cycles against 51 and 53.5). It also ranks slightly worse (ROC-AUC
-  0.009 below the autoencoder, paired interval [0.001, 0.021]). No score
-  warns significantly earlier than the autoencoder at the same
-  false-alarm rate. The reason to keep the autoencoder is still not a
-  better score (section 7.1).
+  0.009 below the autoencoder, paired interval [0.001, 0.021]). Paired
+  engine by engine (`scripts/equal_false_alarm_pairs.py`), the
+  autoencoder's lead minus the One-Class SVM's has a median of −2.5 cycles
+  with no false alarm (95 % interval [−8.5, −1.0]), −3.0 at 0.5 %
+  ([−6.5, +1.0]) and −3.0 at 1 % ([−7.5, +10.0]): the autoencoder's longer
+  marginal medians hide a per-engine lead that is slightly shorter. The
+  three rates are one family: with Holm's correction no sign test is
+  significant (smallest adjusted p = 0.19), while the interval at zero
+  false alarms excludes zero. With 20 engines no score dominates. The
+  reason to keep the autoencoder is still not a better score (section 7.1).
 
 ![Lead time against false alarms](figures/lead_vs_false_alarms.png)
 
@@ -650,6 +656,9 @@ python -m scripts.baselines
 # causal alarm, lead time at equal false-alarm rates, paired ROC-AUC (section 6.6)
 python -m scripts.alarm_rule
 
+# paired lead-time differences at equal false-alarm rates, Holm's correction (section 6.6)
+python -m scripts.equal_false_alarm_pairs
+
 # encoder ablation, 5 architectures x 3 seeds (section 7.2, ≈ 20 min CPU)
 python -m scripts.ablations
 
@@ -771,6 +780,7 @@ section 6.4 without changing the autoencoder.
 │   ├── __init__.py
 │   ├── baselines.py                 # baselines, engine bootstrap, threshold rules
 │   ├── alarm_rule.py                # causal alarm, lead time vs false alarms, paired ROC-AUC
+│   ├── equal_false_alarm_pairs.py   # paired lead differences at equal false-alarm rates, Holm
 │   ├── ablations.py                 # encoder ablation: MLP, 1D-CNN, Transformer, VAE
 │   ├── export_json.py               # arrays → JSON for the portfolio chart
 │   └── demo_preview.py              # static replica of the demo (figures/demo.png)
