@@ -46,3 +46,15 @@ def test_causal_alarm_needs_k_consecutive_windows_and_no_look_ahead() -> None:
     s2 = np.array([1, 1, 1, 0, 0, 1], dtype=float)
     op2 = operating_point(s2, rul2, np.zeros(6, dtype=int), 0.5, k=3)
     assert op2["healthy_false_alarm_rate"] == 0.25 and op2["n_missed"] == 1
+
+
+def test_holm_adjustment_is_step_down_and_monotone():
+    import pytest
+
+    from scripts.equal_false_alarm_pairs import holm
+
+    adj = holm({"a": 0.01, "b": 0.04, "c": 0.03})
+    assert adj["a"] == pytest.approx(0.03)                  # 3 x 0.01
+    assert adj["c"] == pytest.approx(0.06)                  # 2 x 0.03
+    assert adj["b"] == pytest.approx(0.06)                  # max(1 x 0.04, 0.06): monotone
+    assert holm({"x": 0.6, "y": 0.7})["y"] == pytest.approx(1.0)
