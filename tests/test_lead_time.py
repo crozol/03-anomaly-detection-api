@@ -27,6 +27,23 @@ def test_paired_difference_and_sign_test() -> None:
     assert (out["a_earlier"], out["b_earlier"], out["ties"]) == (3, 1, 1)
     # exact two-sided sign test, n = 4, k = 1: 2 * (1 + 4) / 16
     assert abs(out["sign_test_p"] - 10 / 16) < 1e-12
+    # five differences cannot give a 95 % interval matching the sign test
+    assert out["median_ci_sign"]["interval"] is None
+
+
+def test_sign_test_interval_uses_the_order_statistics_of_the_sign_test() -> None:
+    from scripts.baselines import sign_test_interval
+    d = np.arange(20, 0, -1, dtype=float)              # 20 distinct differences, unsorted
+    out = sign_test_interval(d)
+    # P(B <= 5) = 21700 / 2^20 for B ~ Binomial(20, 1/2): [d(6), d(15)] covers 95.9 %
+    assert out["k"] == 6 and out["interval"] == [6.0, 15.0]
+    assert abs(out["coverage"] - (1 - 2 * 21700 / 2 ** 20)) < 1e-12
+    holm = sign_test_interval(d, level=1 - 0.05 / 3)  # first step of Holm over three tests
+    assert holm["k"] == 5 and holm["interval"] == [5.0, 16.0]
+    # 14 negative differences, one tie and 5 positive: the interval reaches the tie at zero
+    d = np.r_[-np.arange(14, 0, -1), 0, np.arange(1, 6)].astype(float)
+    assert sign_test_interval(d)["interval"] == [-9.0, 0.0]
+    assert sign_test_interval([1.0, 2.0])["interval"] is None
 
 
 def test_causal_alarm_needs_k_consecutive_windows_and_no_look_ahead() -> None:

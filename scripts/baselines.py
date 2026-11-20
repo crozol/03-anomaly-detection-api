@@ -97,13 +97,36 @@ def lead_times(score: np.ndarray, rul: np.ndarray, unit: np.ndarray,
     return out
 
 
+def sign_test_interval(d, level: float = 0.95) -> dict:
+    """Distribution-free interval for the median of the differences ``d``, the
+    one that matches the sign test: ``[d(k), d(n - k + 1)]`` of the ordered
+    differences, with the largest ``k`` whose coverage, 1 - 2 P(B <= k - 1)
+    for B ~ Binomial(n, 1/2), is at least ``level``. The coverage is exact for
+    continuous differences and conservative for discrete ones. None when even
+    the full range falls short of ``level``.
+    """
+    d = np.sort(np.asarray(d, dtype=float))
+    n = d.size
+
+    def cover(k: int) -> float:
+        return 1 - 2 * sum(math.comb(n, i) for i in range(k)) / 2 ** n
+
+    if n == 0 or cover(1) < level:
+        return {"interval": None, "coverage": None, "k": None}
+    k = max(j for j in range(1, n // 2 + 1) if cover(j) >= level)
+    return {"interval": [float(d[k - 1]), float(d[n - k])], "coverage": float(cover(k)), "k": k}
+
+
 def paired_lead_difference(lead_a: dict, lead_b: dict, n_boot: int = 10000,
                            seed: int = 0) -> dict:
     """Per-engine lead-time difference a - b, paired on the same engines.
 
     Only engines alarmed by both scores enter. Reports the median difference
     with a bootstrap-over-engines 95 % interval, how many engines each score
-    alarms first, and the exact two-sided sign test (ties dropped).
+    alarms first, and the exact two-sided sign test (ties dropped). Also the
+    95 % interval of ``sign_test_interval``, the one the README reports: with
+    about 20 discrete differences a percentile bootstrap of the median is not
+    reliable (external review of 2026-11-20).
     """
     common = sorted(u for u in lead_a if lead_a[u] is not None and lead_b.get(u) is not None)
     d = np.array([lead_a[u] - lead_b[u] for u in common])
@@ -116,6 +139,7 @@ def paired_lead_difference(lead_a: dict, lead_b: dict, n_boot: int = 10000,
     return {"n_engines": int(d.size), "median": float(np.median(d)),
             "iqr": [float(q1), float(q3)],
             "median_ci95": [float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))],
+            "median_ci_sign": sign_test_interval(d),
             "a_earlier": n_pos, "b_earlier": n_neg, "ties": int((d == 0).sum()),
             "sign_test_p": float(p)}
 
