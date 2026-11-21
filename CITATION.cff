@@ -10,8 +10,8 @@ authors:
     email: rozol.ca555@gmail.com
 repository-code: "https://github.com/crozol/03-anomaly-detection-api"
 license: MIT
-version: "2.0.0"
-date-released: 2026-11-20
+version: "2.0.1"
+date-released: 2026-11-21
 keywords:
   - anomaly detection
   - LSTM autoencoder
