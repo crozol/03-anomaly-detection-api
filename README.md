@@ -6,7 +6,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24393854.svg)](https://doi.org/10.5281/zenodo.24393854)
 [![Live demo on Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Live%20demo-Hugging%20Face%20Space-FFD21E?style=flat-square)](https://huggingface.co/spaces/crozol/cmapss-anomaly-detector)
 
-**TL;DR** — Reconstruction-based anomaly detection on the NASA CMAPSS FD001 turbofan dataset. An LSTM autoencoder is trained on healthy sliding windows; the decision threshold is fixed as the 99th-percentile of the validation reconstruction error (operator-tuneable false-positive budget). On 20 held-out engines: **ROC-AUC = 0.969 [0.954, 0.985]** (95 % CI, bootstrap over engines) · **AP = 0.882** · recall **0.937** at precision **0.608**. It clearly beats a trivial cycle-count score (0.839) and a linear PCA reconstruction (0.895); it does not beat an Isolation Forest on the same windows (0.970; paired difference −0.002, 95 % CI [−0.012, +0.009]). With a causal alarm (three consecutive windows above the q99 threshold) every test engine is flagged before failure, a median of **44 cycles** ahead. With 20 engines no score dominates: a One-Class SVM ranks slightly worse than the autoencoder (ROC-AUC 0.009 lower, paired 95 % CI [0.001, 0.021]) but, with no false alarm on healthy windows, warns first on 14 of 19 engines, a median 2.5 cycles earlier per engine (paired 95 % CI [1.0, 8.5]; sign test p = 0.064, 0.19 after Holm's correction over the three false-alarm rates compared). Wrapped in a typed FastAPI service, a Streamlit demo, and a two-service multi-stage Docker stack. Stack: PyTorch · FastAPI · Streamlit · Docker.
+**TL;DR** — Reconstruction-based anomaly detection on the NASA CMAPSS FD001 turbofan dataset. An LSTM autoencoder is trained on healthy sliding windows; the decision threshold is fixed as the 99th-percentile of the validation reconstruction error (operator-tuneable false-positive budget). On 20 held-out engines: **ROC-AUC = 0.969 [0.954, 0.985]** (95 % CI, bootstrap over engines) · **AP = 0.882** · recall **0.937** at precision **0.608**. It clearly beats a trivial cycle-count score (0.839) and a linear PCA reconstruction (0.895); it does not beat an Isolation Forest on the same windows (0.970; paired difference −0.002, 95 % CI [−0.012, +0.009]). With a causal alarm (three consecutive windows above the q99 threshold) every test engine is flagged before failure, a median of **44 cycles** ahead. With 20 engines no score dominates: a One-Class SVM ranks slightly worse than the autoencoder (ROC-AUC 0.009 lower, paired 95 % CI [0.001, 0.021]) but, with no false alarm on healthy windows, warns first on 14 of 19 engines, a median 2.5 cycles earlier per engine (95.9 % distribution-free interval [0, 9], the one that matches the sign test: p = 0.064, 0.19 after Holm's correction over the three false-alarm rates compared). Wrapped in a typed FastAPI service, a Streamlit demo, and a two-service multi-stage Docker stack. Stack: PyTorch · FastAPI · Streamlit · Docker.
 
 A reconstruction-based anomaly detector for multivariate sensor streams.
 An LSTM autoencoder is trained on healthy sliding windows of the NASA
@@ -442,12 +442,15 @@ What this shows:
   0.009 below the autoencoder, paired interval [0.001, 0.021]). Paired
   engine by engine (`scripts/equal_false_alarm_pairs.py`), the
   autoencoder's lead minus the One-Class SVM's has a median of −2.5 cycles
-  with no false alarm (95 % interval [−8.5, −1.0]), −3.0 at 0.5 %
-  ([−6.5, +1.0]) and −3.0 at 1 % ([−7.5, +10.0]): the autoencoder's longer
-  marginal medians hide a per-engine lead that is slightly shorter. The
-  three rates are one family: with Holm's correction no sign test is
-  significant (smallest adjusted p = 0.19), while the interval at zero
-  false alarms excludes zero. With 20 engines no score dominates. The
+  with no false alarm, −3.0 at 0.5 % and −3.0 at 1 %: the autoencoder's
+  longer marginal medians hide a per-engine lead that is slightly shorter.
+  The distribution-free intervals that match the sign test (the 6th and
+  15th of the 20 ordered differences, 95.9 %; a percentile bootstrap of the
+  median is not reliable with so few discrete differences) are [−9, 0],
+  [−7, +1] and [−8, +16]. The three rates are one family: with Holm's
+  correction no sign test is significant (smallest adjusted p = 0.19), and
+  at the matching level (98.8 %, the 5th and 16th differences) the interval
+  with no false alarm is [−10, +2]. With 20 engines no score dominates. The
   reason to keep the autoencoder is still not a better score (section 7.1).
 
 ![Lead time against false alarms](figures/lead_vs_false_alarms.png)
