@@ -6,24 +6,38 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24393854.svg)](https://doi.org/10.5281/zenodo.24393854)
 [![Live demo on Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Live%20demo-Hugging%20Face%20Space-FFD21E?style=flat-square)](https://huggingface.co/spaces/crozol/cmapss-anomaly-detector)
 
-**TL;DR** — Reconstruction-based anomaly detection on the NASA CMAPSS FD001 turbofan dataset. An LSTM autoencoder is trained on healthy sliding windows; the decision threshold is fixed as the 99th-percentile of the validation reconstruction error (operator-tuneable false-positive budget). On 20 held-out engines: **ROC-AUC = 0.969 [0.954, 0.985]** (95 % CI, bootstrap over engines) · **AP = 0.882** · recall **0.937** at precision **0.608**. It clearly beats a trivial cycle-count score (0.839) and a linear PCA reconstruction (0.895); it does not beat an Isolation Forest on the same windows (0.970; paired difference −0.002, 95 % CI [−0.012, +0.009]). With a causal alarm (three consecutive windows above the q99 threshold) every test engine is flagged before failure, a median of **44 cycles** ahead. With 20 engines no score dominates: a One-Class SVM ranks slightly worse than the autoencoder (ROC-AUC 0.009 lower, paired 95 % CI [0.001, 0.021]) but, with no false alarm on healthy windows, warns first on 14 of 19 engines, a median 2.5 cycles earlier per engine (95.9 % distribution-free interval [0, 9], the one that matches the sign test: p = 0.064, 0.19 after Holm's correction over the three false-alarm rates compared). Wrapped in a typed FastAPI service, a Streamlit demo, and a two-service multi-stage Docker stack. Stack: PyTorch · FastAPI · Streamlit · Docker.
+Reconstruction-based anomaly detection on NASA's CMAPSS turbofan data: an LSTM autoencoder learns
+healthy behaviour, its reconstruction error flags degradation, and the model is served as an API, a
+demo and a Docker stack.
 
-A reconstruction-based anomaly detector for multivariate sensor streams.
-An LSTM autoencoder is trained on healthy sliding windows of the NASA
-CMAPSS turbofan dataset; at inference time the reconstruction error
-becomes the anomaly score, calibrated against a held-out healthy
-validation set, and any window whose error exceeds the threshold is
-flagged. The trained model is wrapped in a typed FastAPI service, an
-interactive Streamlit demo, and a two-service Docker stack.
+**Summary**
 
-The Streamlit demo is also deployed as a public Hugging Face Space —
-[try it in the browser](https://huggingface.co/spaces/crozol/cmapss-anomaly-detector)
-without cloning the repository. The deployment configuration of that
-Space lives in a separate location (see *Live demo deployment* below).
+- **Ranking.** On 20 held-out engines (FD001): **ROC-AUC 0.969 [0.954, 0.985]** (95 % CI, bootstrap
+  over engines), **AP 0.882**, recall **0.937** at precision **0.608** at a threshold fixed as the
+  99th percentile of the healthy validation error.
+- **Against baselines.** Clearly above a trivial cycle-count score (0.839) and a linear PCA
+  reconstruction (0.895); not above an Isolation Forest on the same windows (0.970; paired
+  difference −0.002 [−0.012, +0.009]).
+- **Warning time.** With a causal alarm (three consecutive windows above the threshold) every test
+  engine is flagged before failure, a median of **44 cycles** ahead.
+- **No score dominates.** A One-Class SVM ranks slightly worse (ROC-AUC 0.009 lower, paired 95 % CI
+  [0.001, 0.021]) but, with no false alarm on healthy windows, warns first on 14 of 19 engines, a
+  median 2.5 cycles earlier (95.9 % distribution-free interval [0, 9], matching the sign test:
+  p = 0.064, 0.19 after Holm's correction over the three false-alarm rates compared).
+- **Deployment.** Typed FastAPI service, Streamlit demo (also a public
+  [Hugging Face Space](https://huggingface.co/spaces/crozol/cmapss-anomaly-detector)) and a
+  two-service multi-stage Docker stack. Stack: PyTorch · FastAPI · Streamlit · Docker.
 
-The document walks through the construction in the order one would
-actually perform it: dataset, model, calibration, and the deployment
-artefacts on top.
+![Reconstruction error along the life of test engines](figures/engine_trajectory.png)
+
+**Context.** An autoencoder trained only on normal data reconstructs anomalies poorly, so its error
+is an anomaly score (Sakurada & Yairi, 2014); LSTM encoder–decoders carry the idea to multivariate
+sensor streams (Malhotra et al., 2016). CMAPSS simulates turbofan engines run to failure (Saxena et
+al., 2008). The question here is whether such a model beats simpler detectors, the Isolation Forest
+among them (Liu, Ting & Zhou, 2008), once the uncertainty of having only 20 test engines is counted.
+
+The sections follow the construction: dataset, model, calibration, evaluation against baselines,
+and the deployment artefacts.
 
 ---
 
@@ -259,19 +273,17 @@ or `q99.9`; lowering the quantile trades recall for precision, raising
 it does the opposite. The full ROC sweep below shows where the q99
 operating point sits.
 
-**What the threshold means physically.** Because the autoencoder only ever
-sees nominal operation, it learns the manifold of healthy sensor dynamics; the
-reconstruction error measures how far a 30-cycle window has drifted off it.
-Early in an engine's life the high-pressure compressor operates close to spec
-and the sensor signature reconstructs cleanly; as the HPC degrades, efficiency
-and flow shift, the sensor pattern moves away from anything seen in training,
-and the error climbs. The threshold `τ` is therefore not an arbitrary cut — it
-marks where a window's deviation from nominal exceeds what healthy
-thermodynamic noise can explain (the 1 % tail of the healthy distribution).
-Crossing `τ` is the model reporting that the engine's measured behaviour is no
-longer consistent with a healthy unit. This is also why the false alarms in
-section 6.3 cluster at `RUL` 30–60: they are genuine early degradation that the
-binary `RUL ≤ 30` label has not yet called anomalous.
+**What the threshold means physically.**
+
+- The autoencoder only ever sees nominal operation, so it learns the manifold of healthy sensor
+  dynamics; the reconstruction error measures how far a 30-cycle window has drifted off it.
+- Early in an engine's life the high-pressure compressor (HPC) operates close to spec and the
+  sensor signature reconstructs cleanly; as the HPC degrades, efficiency and flow shift, the
+  pattern moves away from anything seen in training, and the error climbs.
+- The threshold `τ` therefore marks where a window's deviation from nominal exceeds what healthy
+  thermodynamic noise can explain (the 1 % tail of the healthy distribution).
+- This is also why the false alarms of section 6.3 cluster at `RUL` 30–60: genuine early
+  degradation that the binary `RUL ≤ 30` label has not yet called anomalous.
 
 ## 6 · Results · binary anomaly detection
 
@@ -330,19 +342,15 @@ purple curve.
 
 ![confusion matrix](figures/confusion.png)
 
-Row-normalised confusion matrix on the 3 913 test windows. The diagonal
-sits at 88.6 % and 93.7 %; the off-diagonal of interest is the
-**6.3 % miss rate** on truly anomalous windows — 39 windows out of 620
-fall under the threshold. The 11.4 % false-alarm rate (374 healthy
-windows above threshold) is far from the 1 % that "q99" might suggest,
-because the test negatives are not the same population as the
-calibration set: validation holds only RUL > 100 windows, while test
-negatives include the 30 < RUL ≤ 100 grey zone. On test windows with
-RUL > 100 the false-alarm rate is **0 %**; 297 of the 374 false alarms
-(79 %) sit at RUL 30–60, just outside the anomaly cut-off — early degradation
-that the model legitimately picks up but that the binary RUL ≤ 30 label
-considers "healthy". The full per-engine view in section 6.4 makes that
-explicit.
+Row-normalised confusion matrix on the 3 913 test windows:
+
+- The diagonal sits at 88.6 % and 93.7 %; the **miss rate** on truly anomalous windows is
+  **6.3 %** (39 of 620 under the threshold).
+- The 11.4 % false-alarm rate (374 healthy windows above threshold) is far from the 1 % that "q99"
+  suggests, because the test negatives are a different population: validation holds only
+  RUL > 100 windows, test negatives include the 30 < RUL ≤ 100 grey zone.
+- On test windows with RUL > 100 the false-alarm rate is **0 %**; 297 of the 374 false alarms (79 %)
+  sit at RUL 30–60, early degradation that the binary RUL ≤ 30 label calls "healthy" (section 6.4).
 
 ### 6.4 · Per-engine error trajectories
 
@@ -428,30 +436,27 @@ What this shows:
   (95 % interval [−0.012, +0.009]): the two differ by at most about 0.01.
   Engine by engine at the q99 threshold, the autoencoder alarms first on
   11 engines and the forest on 7, with 2 ties (sign test p = 0.48).
-- **At its own q99 threshold the One-Class SVM alarms earlier than the
-  autoencoder on 19 of 20 engines** (median 7 cycles, sign test
-  p = 4·10⁻⁵), but that threshold also lets it raise false alarms on
-  healthy windows (0.26 %, on one engine) where the autoencoder raises
-  none. Each score's q99 falls at a different point of its own trade-off
-  between lead time and false alarms, so the comparison has to be made at
-  equal false-alarm rates (figure below). With no false alarm on healthy
-  windows, the One-Class SVM alarms first on 14 engines and the
-  autoencoder on 5 (p = 0.064); at 0.5 % and 1 %, 12 to 8 and 11 to 7
-  (p ≥ 0.48), and the autoencoder's median lead is the longer one (58 and
-  65.5 cycles against 51 and 53.5). It also ranks slightly worse (ROC-AUC
-  0.009 below the autoencoder, paired interval [0.001, 0.021]). Paired
-  engine by engine (`scripts/equal_false_alarm_pairs.py`), the
-  autoencoder's lead minus the One-Class SVM's has a median of −2.5 cycles
-  with no false alarm, −3.0 at 0.5 % and −3.0 at 1 %: the autoencoder's
-  longer marginal medians hide a per-engine lead that is slightly shorter.
-  The distribution-free intervals that match the sign test (the 6th and
-  15th of the 20 ordered differences, 95.9 %; a percentile bootstrap of the
-  median is not reliable with so few discrete differences) are [−9, 0],
-  [−7, +1] and [−8, +16]. The three rates are one family: with Holm's
-  correction no sign test is significant (smallest adjusted p = 0.19), and
-  at the matching level (98.8 %, the 5th and 16th differences) the interval
-  with no false alarm is [−10, +2]. With 20 engines no score dominates. The
-  reason to keep the autoencoder is still not a better score (section 7.1).
+- **The One-Class SVM: earlier at its own threshold, not at equal false-alarm rates.**
+  - At its own q99 threshold it alarms earlier than the autoencoder on 19 of 20 engines (median 7
+    cycles, sign test p = 4·10⁻⁵), but that threshold also lets it raise false alarms on healthy
+    windows (0.26 %, on one engine) where the autoencoder raises none.
+  - Each score's q99 sits at a different point of its own trade-off between lead time and false
+    alarms, so the comparison has to be made at equal false-alarm rates (figure below).
+  - With no false alarm on healthy windows, the One-Class SVM alarms first on 14 engines and the
+    autoencoder on 5 (p = 0.064); at 0.5 % and 1 %, 12 to 8 and 11 to 7 (p ≥ 0.48), and the
+    autoencoder's median lead is the longer one (58 and 65.5 cycles against 51 and 53.5).
+  - It ranks slightly worse (ROC-AUC 0.009 below the autoencoder, paired interval [0.001, 0.021]).
+  - Paired engine by engine (`scripts/equal_false_alarm_pairs.py`), the autoencoder's lead minus
+    the One-Class SVM's has a median of −2.5 cycles with no false alarm, −3.0 at 0.5 % and −3.0 at
+    1 %: the autoencoder's longer marginal medians hide a per-engine lead that is slightly shorter.
+  - The distribution-free intervals that match the sign test (the 6th and 15th of the 20 ordered
+    differences, 95.9 %; a percentile bootstrap of the median is not reliable with so few discrete
+    differences) are [−9, 0], [−7, +1] and [−8, +16].
+  - The three rates are one family: with Holm's correction no sign test is significant (smallest
+    adjusted p = 0.19); at the matching level (98.8 %, the 5th and 16th differences) the interval
+    with no false alarm is [−10, +2].
+  - With 20 engines no score dominates. The reason to keep the autoencoder is still not a better
+    score (section 7.1).
 
 ![Lead time against false alarms](figures/lead_vs_false_alarms.png)
 
