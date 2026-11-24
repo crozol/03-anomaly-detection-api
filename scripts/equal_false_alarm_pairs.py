@@ -1,7 +1,7 @@
 """Paired lead-time differences at equal healthy false-alarm rates, every score against the
 autoencoder, with the multiplicity of the rates declared.
 
-For the external review of 2026-11-19. scripts/alarm_rule.py compares the scores at equal
+scripts/alarm_rule.py compares the scores at equal
 healthy false-alarm rates with a sign test only; at three rates (0, 0.5 % and 1 %) the One-Class
 SVM alarms first in more engines, while the autoencoder's median lead is longer. This script adds,
 at every rate of data/alarm_rule.json, the per-engine difference the README already reports
@@ -11,7 +11,7 @@ by both, its median with a 95 % bootstrap interval over engines (10 000 resample
 sign test. The three rates the README discusses are one family: their sign-test p-values are also
 given with Holm's correction.
 
-After the external review of 2026-11-20, the interval the README reports is the distribution-free
+Since 2026-11-20, the interval the README reports is the distribution-free
 one that matches the sign test (scripts/baselines.py, sign_test_interval): at 95 % and, for the
 three rates of the family, at the level of the first step of Holm's correction, 1 - 0.05 / 3. A
 percentile bootstrap of the median is not reliable with 20 discrete differences: with no false

@@ -126,7 +126,7 @@ def paired_lead_difference(lead_a: dict, lead_b: dict, n_boot: int = 10000,
     alarms first, and the exact two-sided sign test (ties dropped). Also the
     95 % interval of ``sign_test_interval``, the one the README reports: with
     about 20 discrete differences a percentile bootstrap of the median is not
-    reliable (external review of 2026-11-20).
+    reliable.
     """
     common = sorted(u for u in lead_a if lead_a[u] is not None and lead_b.get(u) is not None)
     d = np.array([lead_a[u] - lead_b[u] for u in common])
