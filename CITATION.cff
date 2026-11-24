@@ -4,8 +4,8 @@ type: software
 title: "Anomaly Detection API: Autoencoder + FastAPI + Docker"
 abstract: "Reconstruction-based anomaly detection on the NASA CMAPSS FD001 turbofan dataset. An LSTM autoencoder trained on healthy sliding windows is compared on 20 held-out engines with a cycle-count score, PCA reconstruction, an Isolation Forest and a one-class SVM, with bootstrap intervals over engines, paired comparisons of warning time at equal false-alarm rates and a causal alarm rule. The model is served through a typed FastAPI service and a Streamlit demo in a multi-stage Docker stack."
 authors:
-  - given-names: "Camilo Andrés"
-    family-names: "Rozo Lozano"
+  - given-names: "Camilo A."
+    family-names: "Rozo L."
     affiliation: "Universidad Nacional de Colombia"
     email: rozol.ca555@gmail.com
 repository-code: "https://github.com/crozol/03-anomaly-detection-api"
